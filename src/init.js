@@ -10,6 +10,7 @@ import {
   persistGithubAuthToken
 } from './api/localstorage';
 import { demoProps } from './demo';
+import { loadRetropilotDrive } from './retropilotloader';
 
 async function authenticate() {
   if (window.location && window.location.pathname === AuthConfig.AUTH_PATH) {
@@ -110,8 +111,21 @@ export default function init() {
   }
 
   return new Promise((resolve) => {
-    authenticate().then(() => {
-      resolve(props);
-    });
+
+    authenticate()
+      .then(() => {
+        const retropilotHost = getUrlParameter('retropilotHost') || '';
+        const driveIdentifier = getUrlParameter('retropilotIdentifier') || '';
+        const seekTime = getUrlParameter('seekTime') || 0;
+        return loadRetropilotDrive(retropilotHost, driveIdentifier, seekTime);
+      })
+      .then(() => {
+        if (global.retropilotLoaded) {
+          Object.assign(props, global.retropilotProps);
+        }
+      })
+      .then(() => {
+        resolve(props);
+      });
   });
 }
