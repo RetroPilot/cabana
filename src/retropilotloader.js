@@ -1,5 +1,7 @@
 import Moment from 'moment';
 import CorollaDBC from './corolla-dbc';
+import DBC from './models/can/dbc';
+import { fetchPersistedDbc } from './api/localstorage';
 
 export async function loadRetropilotDrive(retropilotHost, driveIdentifier, seekTime) {
   if (driveIdentifier == null || !driveIdentifier.length) {
@@ -20,6 +22,8 @@ export async function loadRetropilotDrive(retropilotHost, driveIdentifier, seekT
   }
   global.retropilotLogUrls = retropilotDrive.logUrls;
 
+  const dbcObj = retropilotDrive.dbc && retropilotDrive.dbc.length > 0 ? new DBC(retropilotDrive.dbc) : CorollaDBC;
+
   global.retropilotProps = {
     autoplay: true,
     startTime: seekTime,
@@ -28,16 +32,26 @@ export async function loadRetropilotDrive(retropilotHost, driveIdentifier, seekT
     max: global.retropilotLogUrls.length,
     name: retropilotDrive.driveIdentifier,
     dongleId: retropilotDrive.dongleId,
-    dbc: CorollaDBC,
-    dbcFilename: 'toyota_nodsu_pt_generated.dbc'
+    dbc: dbcObj,
+    dbcFilename: retropilotDrive.dbcFilename || 'toyota_nodsu_pt_generated.dbc',
   };
 
   global.retropilotRoute = {
     fullname: retropilotDrive.name,
     proclog: global.retropilotProps.max,
     start_time: Moment(global.retropilotProps.name, 'YYYY-MM-DD--H-m-s'),
-    url: retropilotDrive.driveUrl
+    url: retropilotDrive.driveUrl,
   };
 
-  global.retropilotLoaded = global.retropilotProps.max > 0;
+  if (global.retropilotProps.max > 0) {
+    const persistedDbc = fetchPersistedDbc(global.retropilotRoute.fullname);
+    if (persistedDbc) {
+      const { dbcFilename, dbc } = persistedDbc;
+      global.retropilotProps.dbc = dbc;
+      global.retropilotProps.dbcFilename = dbcFilename;
+    }
+    global.retropilotLoaded = true;
+  } else {
+    global.retropilotLoaded = false;
+  }
 }
