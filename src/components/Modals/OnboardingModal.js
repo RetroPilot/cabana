@@ -10,6 +10,7 @@ import Modal from './baseModal';
 export default class OnboardingModal extends Component {
   static propTypes = {
     handlePandaConnect: PropTypes.func,
+    handleCsvUpload: PropTypes.func,
     routes: PropTypes.array
   };
 
@@ -22,7 +23,7 @@ export default class OnboardingModal extends Component {
     super(props);
 
     this.state = {
-      webUsbEnabled: !!navigator.usb,
+      webUsbEnabled: typeof navigator !== 'undefined' && 'usb' in navigator,
       viewingUsbInstructions: false,
       pandaConnected: false
     };
@@ -32,25 +33,7 @@ export default class OnboardingModal extends Component {
     this.navigateToExplorer = this.navigateToExplorer.bind(this);
   }
 
-  componentDidMount() {
-    const script = document.createElement("script");
-    document.body.appendChild(script);
-    script.onload = () => {
-      window.AppleID.auth.init({
-        clientId : AuthConfig.APPLE_CLIENT_ID,
-        scope : AuthConfig.APPLE_SCOPES,
-        redirectURI : AuthConfig.APPLE_REDIRECT_URI,
-        state : AuthConfig.APPLE_STATE,
-      });
-    };
-    script.src = "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js";
-    script.async = true;
-    document.addEventListener('AppleIDSignInOnSuccess', (data) => {
-      const { code, state } = data.detail.authorization;
-      window.location = [AuthConfig.APPLE_REDIRECT_PATH, qs.stringify({ code, state })].join('?');
-    });
-    document.addEventListener('AppleIDSignInOnFailure', console.log);
-  }
+
 
   attemptPandaConnection() {
     if (!this.state.webUsbEnabled) {
@@ -107,22 +90,8 @@ export default class OnboardingModal extends Component {
           <sup>Click "View in cabana" while replaying a drive</sup>
         </button>
       );
-    } else {
-      return <>
-        <a href={ AuthConfig.GOOGLE_REDIRECT_LINK } className="button button--primary button--icon">
-          <i className="fa fa-google" />
-          <strong>Sign in with Google</strong>
-        </a>
-        <button onClick={ () => window.AppleID.auth.signIn() } className="button button--primary button--icon">
-          <i className="fa fa-apple" />
-          <strong>Sign in with Apple</strong>
-        </button>
-        <a href={ AuthConfig.GITHUB_REDIRECT_LINK } className="button button--primary button--icon">
-          <i className="fa fa-github" />
-          <strong>Sign in with GitHub</strong>
-        </a>
-      </>;
     }
+    return null;
   }
 
   renderOnboardingOptions() {
@@ -147,6 +116,27 @@ export default class OnboardingModal extends Component {
             </sup>
             {this.renderPandaEligibility()}
           </button>
+        </div>
+        <div className="cabana-onboarding-mode">
+          <button
+            className="button--secondary button--kiosk"
+            onClick={() => this.fileInput.click()}
+          >
+            <i className="fa fa-upload" />
+            <strong>Upload CSV Log</strong>
+            <sup>Load an exported CSV log file for replay</sup>
+          </button>
+          <input
+            ref={(input) => { this.fileInput = input; }}
+            type="file"
+            accept=".csv"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              if (e.target.files && e.target.files[0]) {
+                this.props.handleCsvUpload(e.target.files[0]);
+              }
+            }}
+          />
         </div>
       </div>
     );

@@ -50,10 +50,6 @@ export default {
       "source": "table",
       "transform": [
         {
-          "type": "filter",
-          "expr": "length(segment) != 2 || (datum.relTime >= segment[0] && datum.relTime <= segment[1])"
-        },
-        {
           "type": "extent",
           "field": "y",
           "signal": "ySegment"
@@ -82,7 +78,7 @@ export default {
         "field": "relTime"
       },
       "zero": false,
-      "clamp": true,
+      "clamp": false,
       "nice": true,
       "domainRaw": {
         "signal": "segment"
@@ -94,7 +90,7 @@ export default {
       "range": "height",
       "clamp": true,
       "zero": false,
-      "nice": true,
+      "nice": false,
       "domain": {
         "signal": "ySegment"
       }
@@ -167,6 +163,7 @@ export default {
       "type": "group",
       "name": "plot",
       "interactive": true,
+      "clip": true,
       "encode": {
         "enter": {
           "width": {

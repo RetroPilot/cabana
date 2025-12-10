@@ -7,6 +7,26 @@ import MessageBytes from './MessageBytes';
 
 const { ckmeans } = require('simple-statistics');
 
+function calculateFrequency(entries, seekTime, live, csvPlayback) {
+  if (entries.length < 2) return 0;
+  
+  let relevantEntries = entries;
+  if (!live || csvPlayback) {
+    relevantEntries = entries.filter(e => e.relTime <= seekTime);
+  }
+  
+  if (relevantEntries.length < 2) return 0;
+  
+  const lastEntry = relevantEntries[relevantEntries.length - 1];
+  const oneSecondAgo = lastEntry.relTime - 1.0;
+  
+  const messagesInLastSecond = relevantEntries.filter(e => e.relTime > oneSecondAgo);
+  
+  if (messagesInLastSecond.length < 2) return 0;
+  
+  return Math.round(messagesInLastSecond.length);
+}
+
 export default class Meta extends Component {
   static propTypes = {
     onMessageSelected: PropTypes.func,
@@ -222,8 +242,9 @@ export default class Meta extends Component {
         )}
       >
         <td>{msg.frame ? msg.frame.name : 'untitled'}</td>
-        <td>{msg.id}</td>
+        <td>{msg.bus}:{msg.address.toString(16).toUpperCase()}</td>
         <td>{msg.entries.length}</td>
+        <td style={{ whiteSpace: 'nowrap' }}>{calculateFrequency(msg.entries, this.props.seekTime, this.props.live, this.props.csvPlayback)} Hz</td>
         <td>
           <div className="cabana-meta-messages-list-item-bytes">
             <MessageBytes
@@ -232,6 +253,7 @@ export default class Meta extends Component {
               seekIndex={this.props.seekIndex}
               seekTime={this.props.seekTime}
               live={this.props.live}
+              csvPlayback={this.props.csvPlayback}
             />
           </div>
         </td>
@@ -257,6 +279,7 @@ export default class Meta extends Component {
               <td>Name</td>
               <td>ID</td>
               <td>Count</td>
+              <td>Hz</td>
               <td>Bytes</td>
             </tr>
           </thead>

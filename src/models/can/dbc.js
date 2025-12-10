@@ -543,9 +543,16 @@ export default class DBC {
       sig_msb = signalSpec.startBit;
     }
 
+    // Check if signal extends beyond available data
+    const maxByteNeeded = Math.max(Math.floor(sig_lsb / 8), Math.floor(sig_msb / 8));
+    if (maxByteNeeded >= view.byteLength) {
+      return 0;
+    }
+
     let ret = signalSpec.size > 32 ? 0n : 0;
     let i = Math.floor(sig_msb / 8);
     let bits = signalSpec.size;
+    
     while (i >= 0 && i < view.byteLength && bits > 0) {
       let lsb = Math.floor(sig_lsb / 8) === i ? sig_lsb : i*8;
       let msb = Math.floor(sig_msb / 8) === i ? sig_msb : (i+1)*8 - 1;
@@ -582,7 +589,9 @@ export default class DBC {
       return {};
     }
     const frame = this.getMessageFrame(messageId);
-    const view = new DataView(data.buffer);
+    const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+    
+    
     const signalValuesByName = {};
     Object.values(frame.signals).forEach((signalSpec) => {
       if (isNaN(signalSpec.startBit)) {

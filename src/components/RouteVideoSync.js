@@ -96,10 +96,12 @@ export default class RouteVideoSync extends Component {
     const seekTime = this.ratioTime(ratio);
     const funcSeekToRatio = () => onUserSeek(seekTime);
 
-    if (Number.isNaN(videoElement.duration)) {
-      return;
+    if (videoElement) {
+      if (Number.isNaN(videoElement.duration)) {
+        return;
+      }
+      videoElement.currentTime = seekTime - this.props.videoOffset;
     }
-    videoElement.currentTime = seekTime - this.props.videoOffset;
 
     if (ratio !== 0) {
       funcSeekToRatio();
@@ -138,6 +140,10 @@ export default class RouteVideoSync extends Component {
   videoLength() {
     if (this.props.segment.length) {
       return this.props.segment[1] - this.props.segment[0];
+    }
+
+    if (this.props.csvDuration) {
+      return this.props.csvDuration;
     }
 
     if (this.state.videoElement) {
@@ -187,7 +193,7 @@ export default class RouteVideoSync extends Component {
     } = this.props;
 
     return (
-      <div className="cabana-explorer-visuals-camera">
+      <div className="cabana-explorer-visuals-camera" style={this.props.csvPlayback && !this.state.source ? { minHeight: '60px', position: 'relative', background: '#1a1a1a' } : {}}>
         {isLoading ? this.loadingOverlay() : null}
         {this.state.source && <HLS
           className={css(Styles.hls)}

@@ -55,6 +55,9 @@ export default class MessageBytes extends Component {
   }
 
   shouldComponentUpdate(nextProps, nextState) {
+    if (nextProps.csvPlayback) {
+      return nextProps.seekTime !== this.props.seekTime;
+    }
     if (nextProps.live && nextProps.message.entries.length) {
       const nextLastEntry = nextProps.message.entries[nextProps.message.entries.length - 1];
       const curLastEntry = this.props.message.entries[
@@ -98,13 +101,13 @@ export default class MessageBytes extends Component {
   }
 
   updateCanvas() {
-    const { message, live, seekTime } = this.props;
+    const { message, live, seekTime, csvPlayback } = this.props;
     if (!this.canvas || message.entries.length === 0 || !this.canvasInView()) {
       return;
     }
 
     let mostRecentMsg = message.entries[message.entries.length - 1];
-    if (!live) {
+    if (!live || csvPlayback) {
       mostRecentMsg = this.findMostRecentMessage(seekTime);
 
       if (!mostRecentMsg) {
@@ -113,7 +116,7 @@ export default class MessageBytes extends Component {
     }
 
     const ctx = this.canvas.getContext('2d');
-    // ctx.clearRect(0, 0, 180, 15);
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
     for (let i = 0; i < message.byteStateChangeCounts.length; ++i) {
       const hexData = mostRecentMsg.hexData.substr(i * 2, 2);

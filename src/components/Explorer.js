@@ -449,7 +449,7 @@ export default class Explorer extends Component {
             : this.renderSelectMessagePrompt()}
         </div>
         <div className="cabana-explorer-visuals">
-          {this.props.live === false ? (
+          {this.props.live === false || this.props.csvPlayback ? (
             <div>
               <div className="cabana-explorer-visuals-header g-row">
                 <PlaySpeedSelector
@@ -465,7 +465,7 @@ export default class Explorer extends Component {
                 seekIndex={this.props.seekIndex}
                 userSeekIndex={this.state.userSeekIndex}
                 playing={this.state.playing}
-                url={this.props.url}
+                url={this.props.url || ''}
                 firstCanTime={this.props.firstCanTime}
                 videoOffset={this.props.videoOffset}
                 onVideoClick={this.onVideoClick}
@@ -478,6 +478,9 @@ export default class Explorer extends Component {
                 thumbnails={thumbnails}
                 route={this.props.route}
                 share={this.props.share}
+                csvDuration={this.props.csvDuration}
+                csvPlayback={this.props.csvPlayback}
+                live={this.props.live}
               />
             </div>
           ) : null}

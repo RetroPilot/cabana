@@ -511,6 +511,10 @@ export default class AddSignals extends Component {
       const tt = this.highlightedSignalTooltipRef.current;
       const signal = this.state.signals[this.state.highlightedSignal];
 
+      if (!signal) {
+        return;
+      }
+
       tt.innerHTML = signal.name;
       if (ev) {
         tt.style.left = (ev.clientX + 15) + 'px';

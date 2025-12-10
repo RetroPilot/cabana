@@ -54,7 +54,10 @@ function processStreamedCanMessages(
       const message = extend(canMessages[i]);
       message.busTime = time + busTimeSum / 500000.0;
 
-      if (firstCanTime === 0) {
+      if (firstCanTime === 0 || firstCanTime === null) {
+        firstCanTime = message.busTime;
+      } else if (message.busTime < firstCanTime) {
+        // Adjust if we get an earlier message
         firstCanTime = message.busTime;
       }
 

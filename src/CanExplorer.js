@@ -2,7 +2,7 @@ import React, { Component } from 'react';
 import Moment from 'moment';
 import PropTypes from 'prop-types';
 import cx from 'classnames';
-import { createWriteStream } from 'streamsaver';
+import streamSaver from 'streamsaver';
 import Panda from '@commaai/pandajs';
 import CommaAuth, { storage as CommaAuthStorage, config as AuthConfig } from '@commaai/my-comma-auth';
 import { raw as RawDataApi, drives as DrivesApi } from '@commaai/comma-api';
@@ -30,6 +30,7 @@ import {
 } from './api/localstorage';
 import OpenDbc from './api/OpenDbc';
 import UnloggerClient from './api/unlogger';
+import { parseCSVLog } from './api/csv-loader';
 import { hash } from './utils/string';
 import { modifyQueryParameters } from './utils/url';
 import DbcUtils from './utils/dbc';
@@ -40,6 +41,8 @@ const RLogDownloader = require('./workers/rlog-downloader.worker');
 const LogCSVDownloader = require('./workers/dbc-csv-downloader.worker');
 const MessageParser = require('./workers/message-parser.worker');
 const CanStreamerWorker = require('./workers/CanStreamerWorker.worker');
+
+streamSaver.mitm = `${window.location.origin}/mitm.html`;
 
 const dataCache = {};
 
@@ -123,6 +126,7 @@ export default class CanExplorer extends Component {
     this.lastMessageEntriesById = this.lastMessageEntriesById.bind(this);
     this.githubSignOut = this.githubSignOut.bind(this);
     this.downloadLogAsCSV = this.downloadLogAsCSV.bind(this);
+    this.handleCsvUpload = this.handleCsvUpload.bind(this);
 
     this.pandaReader = new Panda();
     this.pandaReader.onMessage(this.processStreamedCanMessages);
@@ -265,7 +269,7 @@ export default class CanExplorer extends Component {
   }
 
   onDbcSelected(dbcFilename, dbc) {
-    const { route } = this.state;
+    const { route, csvPlayback, messages, firstCanTime } = this.state;
     this.hideLoadDbc();
     dbc.lastUpdated = Date.now();
     this.persistDbc({ dbcFilename, dbc });
@@ -284,6 +288,54 @@ export default class CanExplorer extends Component {
           this.loadMessagesFromCache();
         }
       );
+    } else if (csvPlayback) {
+      // Re-parse CSV messages with new DBC
+      const updatedMessages = { ...messages };
+      Object.keys(updatedMessages).forEach((key) => {
+        const msg = { ...updatedMessages[key] };
+        msg.frame = dbc.getMessageFrame(msg.address);
+        msg.entries = [...msg.entries];
+        let prevEntry = null;
+        const byteStateChangeCounts = [];
+        msg.entries = msg.entries.map((entry) => {
+          const parsed = DbcUtils.parseMessage(
+            dbc,
+            entry.time,
+            msg.address,
+            entry.data,
+            firstCanTime,
+            prevEntry
+          );
+          prevEntry = parsed.msgEntry;
+          byteStateChangeCounts.push(parsed.byteStateChangeCounts);
+          return {
+            ...entry,
+            signals: parsed.msgEntry.signals,
+            byteStateChangeCounts: parsed.byteStateChangeCounts
+          };
+        });
+        msg.byteStateChangeCounts = byteStateChangeCounts.reduce((memo, val) => {
+          if (!memo) return val;
+          return memo.map((count, idx) => val[idx] + count);
+        }, null);
+        updatedMessages[key] = msg;
+      });
+      
+      const maxByteStateChangeCount = DbcUtils.findMaxByteStateChangeCount(updatedMessages);
+      Object.keys(updatedMessages).forEach((key) => {
+        updatedMessages[key] = DbcUtils.setMessageByteColors(
+          updatedMessages[key],
+          maxByteStateChangeCount
+        );
+      });
+      
+      this.setState({
+        dbc,
+        dbcFilename,
+        dbcText: dbc.text(),
+        messages: updatedMessages,
+        maxByteStateChangeCount
+      });
     } else {
       this.setState({
         dbc,
@@ -309,28 +361,29 @@ export default class CanExplorer extends Component {
   downloadLogAsCSV() {
     console.log('downloadLogAsCSV:start');
     const { dbcFilename } = this.state;
-    const fileStream = createWriteStream(
-      `${dbcFilename.replace(/\.dbc/g, '-')}${+new Date()}.csv`
-    );
-    const writer = fileStream.getWriter();
-    const encoder = new TextEncoder();
-
-    if (this.state.live) {
-      return this.downloadLiveLogAsCSV(dataHandler);
-    }
-    return this.downloadRawLogAsCSV(dataHandler);
+    const csvData = [];
 
     function dataHandler(e) {
       const { logData, shouldClose, progress } = e.data;
       if (shouldClose) {
         console.log('downloadLogAsCSV:close');
-        writer.close();
+        const blob = new Blob([csvData.join('\n')], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${dbcFilename.replace(/\.dbc/g, '-')}${+new Date()}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
         return;
       }
       console.log('CSV export progress:', progress);
-      const uint8array = encoder.encode(`${logData}\n`);
-      writer.write(uint8array);
+      csvData.push(logData);
     }
+
+    if (this.state.live) {
+      return this.downloadLiveLogAsCSV(dataHandler);
+    }
+    return this.downloadRawLogAsCSV(dataHandler);
   }
 
   downloadRawLogAsCSV(handler) {
@@ -345,10 +398,13 @@ export default class CanExplorer extends Component {
     const worker = new LogCSVDownloader();
 
     worker.onmessage = handler;
+    
+    // Use full message history if available (live streaming), otherwise use current messages
+    const messagesToExport = this.fullMessageHistory || this.state.messages;
 
     worker.postMessage({
-      data: Object.keys(this.state.messages).map((sourceId) => {
-        const source = this.state.messages[sourceId];
+      data: Object.keys(messagesToExport).map((sourceId) => {
+        const source = messagesToExport[sourceId];
         return {
           id: source.id,
           bus: source.bus,
@@ -979,18 +1035,20 @@ export default class CanExplorer extends Component {
   }
 
   persistDbc({ dbcFilename, dbc }) {
-    const { route } = this.state;
+    const { route, csvPlayback } = this.state;
     if (route) {
       persistDbc(route.fullname, { dbcFilename, dbc });
     } else {
       persistDbc('live', { dbcFilename, dbc });
     }
 
-    this.loadMessagesFromCache();
+    if (!csvPlayback) {
+      this.loadMessagesFromCache();
+    }
   }
 
   onConfirmedSignalChange(message, signals) {
-    const { dbc, dbcFilename } = this.state;
+    const { dbc, dbcFilename, csvPlayback, messages, firstCanTime } = this.state;
     const frameSize = DbcUtils.maxMessageSize(message);
     dbc.setSignals(message.address, { ...signals }, frameSize);
 
@@ -998,10 +1056,37 @@ export default class CanExplorer extends Component {
 
     this.updateMessageFrame(message.id, dbc.getMessageFrame(message.address));
 
-    this.setState({ dbc, dbcText: dbc.text() }, () => {
-      this.decacheMessageId(message.id);
-      this.loadMessagesFromCache();
-    });
+    if (csvPlayback) {
+      // Re-parse CSV messages with new signal definitions
+      const updatedMessages = { ...messages };
+      const msg = { ...updatedMessages[message.id] };
+      msg.frame = dbc.getMessageFrame(msg.address);
+      msg.entries = [...msg.entries];
+      let prevEntry = null;
+      msg.entries = msg.entries.map((entry) => {
+        const parsed = DbcUtils.parseMessage(
+          dbc,
+          entry.time,
+          msg.address,
+          entry.data,
+          firstCanTime,
+          prevEntry
+        );
+        prevEntry = parsed.msgEntry;
+        return {
+          ...entry,
+          signals: parsed.msgEntry.signals,
+          byteStateChangeCounts: parsed.byteStateChangeCounts
+        };
+      });
+      updatedMessages[message.id] = msg;
+      this.setState({ dbc, dbcText: dbc.text(), messages: updatedMessages });
+    } else {
+      this.setState({ dbc, dbcText: dbc.text() }, () => {
+        this.decacheMessageId(message.id);
+        this.loadMessagesFromCache();
+      });
+    }
   }
 
   partChangeDebounced = debounce(() => {
@@ -1014,7 +1099,7 @@ export default class CanExplorer extends Component {
     let {
       currentParts, currentPart, canFrameOffset, route
     } = this.state;
-    if (canFrameOffset === -1 || part === currentPart) {
+    if (canFrameOffset === -1 || part === currentPart || !route) {
       return;
     }
 
@@ -1229,7 +1314,23 @@ export default class CanExplorer extends Component {
     }
 
     let messages = this.addAndRehydrateMessages(newMessages);
-    messages = this.enforceStreamingMessageWindow(messages);
+    
+    // Store full history for CSV export (before windowing)
+    if (!this.fullMessageHistory) {
+      this.fullMessageHistory = {};
+    }
+    Object.keys(newMessages).forEach(key => {
+      if (!this.fullMessageHistory[key]) {
+        this.fullMessageHistory[key] = { ...messages[key], entries: [...messages[key].entries] };
+      } else {
+        this.fullMessageHistory[key].entries = this.fullMessageHistory[key].entries.concat(newMessages[key].entries);
+      }
+    });
+    
+    // Only trim displayed data for live streaming, not CSV playback
+    if (!this.state.csvPlayback) {
+      messages = this.enforceStreamingMessageWindow(messages);
+    }
     let { seekIndex, selectedMessages } = this.state;
     if (
       selectedMessages.length > 0
@@ -1283,6 +1384,54 @@ export default class CanExplorer extends Component {
     this.setState({ isGithubAuthenticated: false });
 
     e.preventDefault();
+  }
+
+  handleCsvUpload(file) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const { messages, firstCanTime, duration } = parseCSVLog(e.target.result);
+        
+        const { dbc } = this.state;
+        Object.keys(messages).forEach((key) => {
+          const msg = messages[key];
+          msg.frame = dbc.getMessageFrame(msg.address);
+          
+          // Parse signals for each entry
+          if (msg.frame) {
+            let prevEntry = null;
+            msg.entries.forEach((entry) => {
+              const parsed = DbcUtils.parseMessage(
+                dbc,
+                entry.time,
+                msg.address,
+                entry.data,
+                firstCanTime,
+                prevEntry
+              );
+              entry.signals = parsed.msgEntry.signals;
+              entry.byteStateChangeCounts = parsed.byteStateChangeCounts;
+              prevEntry = parsed.msgEntry;
+            });
+          }
+        });
+
+        this.setState({
+          messages,
+          firstCanTime,
+          canFrameOffset: 0,
+          route: null,
+          csvDuration: duration,
+          csvPlayback: true,
+          showOnboarding: false,
+          showLoadDbc: true,
+          live: true
+        });
+      } catch (err) {
+        alert('Error parsing CSV: ' + err.message);
+      }
+    };
+    reader.readAsText(file);
   }
 
   render() {
@@ -1356,6 +1505,7 @@ export default class CanExplorer extends Component {
             shareUrl={shareUrl}
             maxByteStateChangeCount={maxByteStateChangeCount}
             live={live}
+            csvPlayback={this.state.csvPlayback}
             saveLog={debounce(this.downloadLogAsCSV, 500)}
           />
           {route || live ? (
@@ -1388,6 +1538,8 @@ export default class CanExplorer extends Component {
               maxqcamera={route ? route.maxqcamera : 0}
               route={route}
               share={share}
+              csvDuration={this.state.csvDuration}
+              csvPlayback={this.state.csvPlayback}
             />
           ) : null}
         </div>
@@ -1395,6 +1547,7 @@ export default class CanExplorer extends Component {
         {this.state.showOnboarding ? (
           <OnboardingModal
             handlePandaConnect={this.handlePandaConnect}
+            handleCsvUpload={this.handleCsvUpload}
             attemptingPandaConnection={this.state.attemptingPandaConnection}
             routes={this.state.routes}
           />

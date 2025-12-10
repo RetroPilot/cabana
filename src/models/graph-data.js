@@ -15,6 +15,8 @@ function _calcGraphData(msg, signalUid, firstCanTime) {
     console.warn('_calcGraphData: no signal', signalUid, msg);
     return null;
   }
+  
+
   let samples = [];
   const skip = Math.floor(msg.entries.length / CAN_GRAPH_MAX_POINTS);
 
@@ -33,31 +35,32 @@ function _calcGraphData(msg, signalUid, firstCanTime) {
 
   const colors = signal.getColors(msg.id);
   signalUid = msg.id + signalUid;
-  // sorting these doesn't fix the phantom lines
+  // Sort samples by relTime to handle out-of-order messages
+  samples.sort((a, b) => a.relTime - b.relTime);
+  
   let lastEntry = samples[0].relTime;
-  return samples
-    .filter((e) => e.signals[signal.name] !== undefined)
+  const results = samples
+    .filter((e) => e.signals[signal.name] !== undefined && e.signals[signal.name] !== null)
     .map((entry) => {
-      if (entry.relTime < lastEntry) {
-        console.log(msg);
-        console.error('Found out of order messages');
-        debugger;
-      }
       if (entry.relTime - lastEntry > 2) {
         signalUid = Math.random().toString(36);
       }
       lastEntry = entry.relTime;
-      // console.log(entry.relTime - lastEntry);
+      const value = entry.signals[signal.name];
+      const yValue = typeof value === 'bigint' ? Number(value) : parseFloat(value);
+      
+      
       return {
         x: entry.time,
         relTime: entry.relTime,
-        y: parseFloat(entry.signals[signal.name]),
+        y: isNaN(yValue) ? 0 : yValue,
         unit: signal.unit,
         color: `rgba(${colors.join(',')}, 0.5)`,
         signalName: signal.name,
         signalUid
       };
     });
+  return results;
 }
 
 function appendNewGraphData(plottedSignals, graphData, messages, firstCanTime) {

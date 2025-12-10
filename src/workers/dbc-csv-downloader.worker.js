@@ -26,8 +26,8 @@ function transformAndSend(rawData) {
     return Math.max(memo, getLastTimeFromEntries(sourceData.entries));
   }, 0);
 
-  const minTime = Math.max(0, maxTime - 30);
-  console.log('Time span from', minTime, maxTime);
+  const minTime = 0;
+  console.log('Exporting from', minTime, 'to', maxTime, 'seconds');
   const curIndexes = {};
   rawData.forEach((sourceData) => {
     if (!sourceData.entries.length) {

@@ -154,6 +154,33 @@ export default class RouteSeeker extends Component {
 
   executePlayTimer() {
     const { videoElement } = this.props;
+    
+    if (videoElement === null && this.props.videoLength > 0) {
+      // CSV playback without video
+      const now = Date.now();
+      if (!this.lastPlayTime) {
+        this.lastPlayTime = now;
+      }
+      const elapsed = (now - this.lastPlayTime) / 1000;
+      this.lastPlayTime = now;
+      
+      const { segment, videoLength } = this.props;
+      const effectiveLength = segment && segment.length === 2 ? segment[1] - segment[0] : videoLength;
+      const startOffset = segment && segment.length === 2 ? segment[0] : 0;
+      
+      let newRatio = this.state.ratio + (elapsed / effectiveLength);
+      if (newRatio >= 1) {
+        newRatio = 0;
+        this.lastPlayTime = now;
+        this.setState({ ratio: 0 });
+      }
+      this.updateSeekedBar(newRatio);
+      const seekTime = startOffset + (newRatio * effectiveLength);
+      this.props.onPlaySeek(seekTime);
+      this.playTimer = window.requestAnimationFrame(this.executePlayTimer);
+      return;
+    }
+    
     if (videoElement === null) {
       this.playTimer = window.requestAnimationFrame(this.executePlayTimer);
       return;
@@ -173,13 +200,13 @@ export default class RouteSeeker extends Component {
       return;
     }
 
-    if ((newRatio >= 1 && this.props.segment && this.props.segment.length) || newRatio < 0) {
+    if (newRatio >= 1 || newRatio < 0) {
       newRatio = 0;
       currentTime = startTime;
       this.props.onUserSeek(newRatio);
-    } else if (newRatio >= 1) {
-      videoElement.pause();
-      this.onPause();
+      if (newRatio >= 1 && !this.props.segment) {
+        // Don't pause, just loop
+      }
     }
 
     if (newRatio >= 0) {

@@ -63,7 +63,7 @@ export default class CanGraph extends Component {
   getGraphData(props) {
     let firstRelTime = -1;
     let lastRelTime = -1;
-    const series = props.plottedSignals
+    let allSeries = props.plottedSignals
       .map((signals) => {
         const { messageId, signalUid } = signals;
         const { entries } = props.messages[messageId];
@@ -85,9 +85,18 @@ export default class CanGraph extends Component {
       })
       .reduce((m, v) => m.concat(v), []);
 
+    // Filter to 60-second window if time > 60
+    if (props.segment.length === 0 && props.currentTime > 60) {
+      const windowStart = props.currentTime - 60;
+      allSeries = allSeries.filter(d => d.relTime >= windowStart && d.relTime <= props.currentTime);
+    }
+
+    // Sort all series by relTime to fix jittery lines
+    allSeries.sort((a, b) => a.relTime - b.relTime);
+
     return {
       updated: Date.now(),
-      series,
+      series: allSeries,
       firstRelTime,
       lastRelTime
     };
@@ -146,12 +155,9 @@ export default class CanGraph extends Component {
 
   insertData = debounce(() => {
     if (!this.view) {
-      console.log('Cannot insertData');
       return;
     }
 
-    // adding plot points by diff isn't faster since it basically has to be n^2
-    // out-of-order events make it so that you can't just check the bounds
     const { series } = this.state.data;
     const changeset = this.view
       .changeset()
@@ -174,17 +180,36 @@ export default class CanGraph extends Component {
     }
     if (this.segmentIsNew(this.props.segment)) {
       this.setState({ spec: this.getGraphSpec(this.props) });
+    } else if (this.props.segment.length === 0 && this.props.currentTime > 60) {
+      // Update spec to show 60-second window
+      const windowStart = this.props.currentTime - 60;
+      this.setState({ 
+        spec: {
+          ...CanPlotSpec,
+          scales: [
+            {
+              ...CanPlotSpec.scales[0],
+              domainMin: windowStart,
+              domainMax: this.props.currentTime
+            },
+            ...CanPlotSpec.scales.slice(1)
+          ]
+        }
+      });
     }
 
     if (this.view) {
-      if (this.props.segment.length > 0) {
-        // Set segmented domain
+      if (this.props.segment.length > 0 && this.props.currentTime <= this.props.segment[1]) {
         this.view.signal('segment', this.props.segment);
+      } else if (this.props.currentTime > 60) {
+        const domain = [this.props.currentTime - 60, this.props.currentTime];
+        this.view.signal('segment', domain);
       } else {
-        // Reset segment to full domain
         this.view.signal('segment', 0);
       }
-      this.view.signal('videoTime', this.props.currentTime);
+      if (this.props.currentTime !== undefined) {
+        this.view.signal('videoTime', this.props.currentTime);
+      }
       this.view.runAsync();
     }
   }
@@ -193,26 +218,21 @@ export default class CanGraph extends Component {
     if (!this.view) {
       return true;
     }
+    
+    if (this.props.currentTime !== nextProps.currentTime) {
+      return true;
+    }
+    
     if (this.props.messages !== nextProps.messages || this.props.plottedSignal !== nextProps.plottedSignal ||
       this.segmentIsNew(nextProps.segment) || this.state.spec !== nextState.spec)
     {
       return true;
     }
+    
     if (this.state.data !== nextState.data) {
       this.insertData();
     }
-    if (this.props.currentTime !== nextProps.currentTime) {
-      this.view.signal('videoTime', nextProps.currentTime);
-    }
-    if (this.segmentIsNew(nextProps.segment)) {
-      if (nextProps.segment.length > 0) {
-        // Set segmented domain
-        this.view.signal('segment', nextProps.segment);
-      } else {
-        // Reset segment to full domain
-        this.view.signal('segment', 0);
-      }
-    }
+    
     this.view.runAsync();
     return false;
   }
