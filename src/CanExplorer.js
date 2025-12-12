@@ -127,6 +127,8 @@ export default class CanExplorer extends Component {
     this.githubSignOut = this.githubSignOut.bind(this);
     this.downloadLogAsCSV = this.downloadLogAsCSV.bind(this);
     this.handleCsvUpload = this.handleCsvUpload.bind(this);
+    this.onDbcFilenameChange = this.onDbcFilenameChange.bind(this);
+
 
     this.pandaReader = new Panda();
     this.pandaReader.onMessage(this.processStreamedCanMessages);
@@ -1127,10 +1129,7 @@ export default class CanExplorer extends Component {
   showEditMessageModal(msgKey) {
     const msg = this.state.messages[msgKey];
     console.log(msg);
-    if (!msg.frame) {
-      msg.frame = this.state.dbc.createFrame(msg.address);  // TODO frameSize
-    }
-
+    
     this.setState({
       showEditMessageModal: true,
       editMessageModalMessage: msgKey,
@@ -1153,8 +1152,9 @@ export default class CanExplorer extends Component {
     dbc.messages.set(messageFrame.id, messageFrame);
     this.persistDbc({ dbcFilename, dbc });
 
-    messages[editMessageModalMessage] = message;
-    this.setState({ messages, dbc, dbcText: dbc.text() });
+    const updatedMessages = { ...messages };
+    updatedMessages[editMessageModalMessage] = message;
+    this.setState({ messages: updatedMessages, dbc, dbcText: dbc.text() });
     this.hideEditMessageModal();
   }
 
@@ -1386,35 +1386,20 @@ export default class CanExplorer extends Component {
     e.preventDefault();
   }
 
+  onDbcFilenameChange(filename) {
+    this.setState({ dbcFilename: filename });
+  }
+
+
+
   handleCsvUpload(file) {
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
         const { messages, firstCanTime, duration } = parseCSVLog(e.target.result);
         
-        const { dbc } = this.state;
-        Object.keys(messages).forEach((key) => {
-          const msg = messages[key];
-          msg.frame = dbc.getMessageFrame(msg.address);
-          
-          // Parse signals for each entry
-          if (msg.frame) {
-            let prevEntry = null;
-            msg.entries.forEach((entry) => {
-              const parsed = DbcUtils.parseMessage(
-                dbc,
-                entry.time,
-                msg.address,
-                entry.data,
-                firstCanTime,
-                prevEntry
-              );
-              entry.signals = parsed.msgEntry.signals;
-              entry.byteStateChangeCounts = parsed.byteStateChangeCounts;
-              prevEntry = parsed.msgEntry;
-            });
-          }
-        });
+        // Reset to new DBC for new CSV
+        const newDbc = new DBC();
 
         this.setState({
           messages,
@@ -1425,7 +1410,14 @@ export default class CanExplorer extends Component {
           csvPlayback: true,
           showOnboarding: false,
           showLoadDbc: true,
-          live: true
+          live: true,
+          dbc: newDbc,
+          dbcFilename: NEW_DBC,
+          dbcText: newDbc.text(),
+          selectedMessage: null,
+          selectedMessages: [],
+          seekTime: 0,
+          seekIndex: 0
         });
       } catch (err) {
         alert('Error parsing CSV: ' + err.message);
@@ -1465,23 +1457,8 @@ export default class CanExplorer extends Component {
       >
         <div className="cabana-header">
           <a className="cabana-header-logo" href="/">
-            Comma Cabana
+            RetroPilot Cabana
           </a>
-          <div className="cabana-header-account">
-            {this.state.isGithubAuthenticated ? (
-              <div>
-                <p>GitHub Authenticated</p>
-                <p
-                  className="cabana-header-account-signout"
-                  onClick={this.githubSignOut}
-                >
-                  Sign out
-                </p>
-              </div>
-            ) : (
-              this.loginWithGithub()
-            )}
-          </div>
         </div>
         <div className="cabana-window">
           <Meta
@@ -1507,6 +1484,8 @@ export default class CanExplorer extends Component {
             live={live}
             csvPlayback={this.state.csvPlayback}
             saveLog={debounce(this.downloadLogAsCSV, 500)}
+            handleCsvUpload={this.handleCsvUpload}
+            onDbcFilenameChange={this.onDbcFilenameChange}
           />
           {route || live ? (
             <Explorer
@@ -1568,9 +1547,6 @@ export default class CanExplorer extends Component {
             sourceDbcFilename={this.state.dbcFilename}
             onDbcSaved={this.onDbcSaved}
             handleClose={this.hideSaveDbc}
-            openDbcClient={this.openDbcClient}
-            hasGithubAuth={this.props.githubAuthToken !== null}
-            loginWithGithub={this.loginWithGithub()}
           />
         ) : null}
 

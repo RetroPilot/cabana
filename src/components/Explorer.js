@@ -354,7 +354,7 @@ export default class Explorer extends Component {
   renderExplorerSignals() {
     const selectedMessageKey = this.props.selectedMessage;
     const selectedMessage = this.props.messages[selectedMessageKey];
-    const selectedMessageName = selectedMessage.frame !== undefined
+    const selectedMessageName = selectedMessage.frame && selectedMessage.frame.name
       ? selectedMessage.frame.name
       : 'undefined';
     return (

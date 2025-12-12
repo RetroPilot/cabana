@@ -2,6 +2,7 @@ import React, { Component } from 'react';
 import PropTypes from 'prop-types';
 
 import Modal from './Modals/baseModal';
+import Frame from '../models/can/frame';
 
 export default class EditMessageModal extends Component {
   static propTypes = {
@@ -13,8 +14,29 @@ export default class EditMessageModal extends Component {
   constructor(props) {
     super(props);
 
+    // Create a temporary frame if one doesn't exist
+    let frameToEdit;
+    if (props.message.frame) {
+      frameToEdit = {
+        ...props.message.frame,
+        transmitters: [...props.message.frame.transmitters],
+        signals: { ...props.message.frame.signals }
+      };
+    } else {
+      // Create a temporary frame for editing
+      frameToEdit = new Frame({
+        name: 'untitled',
+        id: props.message.address,
+        size: 8,
+        transmitters: ['XXX'],
+        extended: 0,
+        comment: null,
+        signals: {}
+      });
+    }
+
     this.state = {
-      messageFrame: props.message.frame.copy()
+      messageFrame: frameToEdit
     };
     this.handleSave = this.handleSave.bind(this);
     this.editTransmitter = this.editTransmitter.bind(this);

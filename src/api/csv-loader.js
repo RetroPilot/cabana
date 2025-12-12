@@ -41,17 +41,43 @@ export function parseCSVLog(csvText) {
     }
 
     const paddedHexData = hexData.padEnd(16, '0');
+    const relTime = time - firstTime;
+    
+    // Calculate byte state changes
+    const entryByteChangeCounts = new Array(8).fill(0);
+    const lastEntry = messages[messageId].entries[messages[messageId].entries.length - 1];
+    
+    if (lastEntry) {
+      for (let byteIdx = 0; byteIdx < Math.min(8, paddedHexData.length / 2); byteIdx++) {
+        const currentByte = paddedHexData.substr(byteIdx * 2, 2);
+        const lastByte = lastEntry.hexData.substr(byteIdx * 2, 2);
+        if (currentByte !== lastByte) {
+          entryByteChangeCounts[byteIdx] = 1;
+          messages[messageId].byteStateChangeCounts[byteIdx]++;
+        }
+      }
+    }
+
     messages[messageId].entries.push({
       time,
-      relTime: time - firstTime,
+      relTime,
       address,
       bus,
       data: new Uint8Array(data),
       hexData: paddedHexData,
       signals: {},
-      byteStateChangeCounts: new Array(8).fill(0)
+      byteStateChangeCounts: entryByteChangeCounts
     });
   }
+
+  // Calculate byte colors based on state change counts
+  Object.values(messages).forEach(message => {
+    const maxChanges = Math.max(...message.byteStateChangeCounts, 1);
+    message.byteColors = message.byteStateChangeCounts.map(count => {
+      const intensity = Math.min(255, 75 + 180 * (count / maxChanges));
+      return `rgb(${Math.round(intensity)},0,0)`;
+    });
+  });
 
   const lastTime = lines.length > 1 ? parseFloat(lines[lines.length - 1].split(',')[0]) : firstTime;
   const duration = lastTime - firstTime;

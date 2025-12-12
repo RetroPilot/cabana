@@ -48,7 +48,8 @@ export default class Meta extends Component {
     seekTime: PropTypes.number,
     loginWithGithub: PropTypes.element,
     isDemo: PropTypes.bool,
-    live: PropTypes.bool
+    live: PropTypes.bool,
+
   };
 
   constructor(props) {
@@ -59,6 +60,10 @@ export default class Meta extends Component {
     this.onFilterUnfocus = this.onFilterUnfocus.bind(this);
     this.canMsgFilter = this.canMsgFilter.bind(this);
     this.renderMessageBytes = this.renderMessageBytes.bind(this);
+    this.onFilenameEdit = this.onFilenameEdit.bind(this);
+    this.onFilenameChange = this.onFilenameChange.bind(this);
+    this.onFilenameBlur = this.onFilenameBlur.bind(this);
+
 
     const { dbcLastSaved } = props;
 
@@ -68,6 +73,9 @@ export default class Meta extends Component {
         dbcLastSaved !== null ? this.props.dbcLastSaved.fromNow() : null,
       hoveredMessages: [],
       orderedMessageKeys: [],
+      editingFilename: false,
+      tempFilename: props.dbcFilename,
+
     };
   }
 
@@ -170,6 +178,27 @@ export default class Meta extends Component {
     }
   }
 
+  onFilenameEdit() {
+    this.setState({ 
+      editingFilename: true, 
+      tempFilename: this.props.dbcFilename === 'New_DBC' ? '' : this.props.dbcFilename 
+    });
+  }
+
+  onFilenameChange(e) {
+    this.setState({ tempFilename: e.target.value });
+  }
+
+  onFilenameBlur() {
+    const filename = this.state.tempFilename.trim() || 'New_DBC';
+    this.setState({ editingFilename: false });
+    if (this.props.onDbcFilenameChange) {
+      this.props.onDbcFilenameChange(filename);
+    }
+  }
+
+
+
   canMsgFilter(msg) {
     const { filterText } = this.state;
     const msgName = msg.frame ? msg.frame.name : '';
@@ -220,7 +249,7 @@ export default class Meta extends Component {
   orderedMessages() {
     const { orderedMessageKeys } = this.state;
     const { messages } = this.props;
-    return orderedMessageKeys.map((key) => messages[key]);
+    return orderedMessageKeys.map((key) => messages[key]).filter(msg => msg);
   }
 
   selectedMessageClass(messageId) {
@@ -241,7 +270,14 @@ export default class Meta extends Component {
           this.selectedMessageClass(msg.id)
         )}
       >
-        <td>{msg.frame ? msg.frame.name : 'untitled'}</td>
+        <td>
+          <span 
+            onDoubleClick={() => this.props.showEditMessageModal(msg.id)}
+            style={{ cursor: 'pointer' }}
+          >
+            {msg.frame ? msg.frame.name : 'untitled'}
+          </span>
+        </td>
         <td>{msg.bus}:{msg.address.toString(16).toUpperCase()}</td>
         <td>{msg.entries.length}</td>
         <td style={{ whiteSpace: 'nowrap' }}>{calculateFrequency(msg.entries, this.props.seekTime, this.props.live, this.props.csvPlayback)} Hz</td>
@@ -303,14 +339,30 @@ export default class Meta extends Component {
 
   render() {
     return (
-      <div className="cabana-meta">
+      <div className="cabana-meta" style={{ minWidth: '500px' }}>
         <div className="cabana-meta-header">
           <h5 className="cabana-meta-header-label t-capline">
             Currently editing:
           </h5>
-          <strong className="cabana-meta-header-filename">
-            {this.props.dbcFilename}
-          </strong>
+          {this.state.editingFilename ? (
+            <input
+              type="text"
+              value={this.state.tempFilename}
+              onChange={this.onFilenameChange}
+              onBlur={this.onFilenameBlur}
+              onKeyPress={(e) => e.key === 'Enter' && e.target.blur()}
+              autoFocus
+              style={{ fontSize: '14px', fontWeight: 'bold' }}
+            />
+          ) : (
+            <strong 
+              className="cabana-meta-header-filename"
+              onClick={this.onFilenameEdit}
+              style={{ cursor: 'pointer' }}
+            >
+              {this.props.dbcFilename}
+            </strong>
+          )}
           {this.props.dbcLastSaved !== null ? (
             <div className="cabana-meta-header-last-saved">
               <p>
@@ -319,15 +371,44 @@ export default class Meta extends Component {
               </p>
             </div>
           ) : null}
-          <div className={`cabana-meta-header-actions ${this.saveable()}`}>
-            <div className="cabana-meta-header-action">
-              <button onClick={this.props.showLoadDbc}>Load DBC</button>
-            </div>
-            {this.saveable() && (
+          <div className="cabana-meta-header-actions" style={{ minWidth: '400px' }}>
+            {this.props.csvPlayback ? (
               <div className="cabana-meta-header-action">
-                <button onClick={this.props.saveLog}>Save Log</button>
+                <input
+                  type="file"
+                  accept=".csv"
+                  onChange={(e) => {
+                    if (e.target.files[0]) {
+                      this.props.handleCsvUpload(e.target.files[0]);
+                      e.target.value = '';
+                    }
+                  }}
+                  style={{ display: 'none' }}
+                  ref={(input) => { this.csvFileInput = input; }}
+                />
+                <button className="button--wide" onClick={() => this.csvFileInput.click()}>
+                  <i className="fa fa-upload" /> Load Log
+                </button>
               </div>
+            ) : (
+              this.saveable() && (
+                <div className="cabana-meta-header-action">
+                  <button className="button--wide" onClick={this.props.saveLog}>
+                    <i className="fa fa-download" /> Save Log
+                  </button>
+                </div>
+              )
             )}
+            <div className="cabana-meta-header-action">
+              <button className="button--wide" onClick={this.props.showLoadDbc}>
+                <i className="fa fa-folder-open" /> Load DBC
+              </button>
+            </div>
+            <div className="cabana-meta-header-action">
+              <button className="button--wide" onClick={this.props.showSaveDbc}>
+                <i className="fa fa-save" /> Save DBC
+              </button>
+            </div>
             {this.props.shareUrl ? (
               <div
                 className="cabana-meta-header-action special-wide"
@@ -336,17 +417,14 @@ export default class Meta extends Component {
                 ref={(ref) => (ref ? new Clipboard(ref) : null)}
               >
                 <a
-                  className="button"
+                  className="button button--wide"
                   href={this.props.shareUrl}
                   onClick={(e) => e.preventDefault()}
                 >
-                  Copy Share Link
+                  <i className="fa fa-share" /> Copy Share Link
                 </a>
               </div>
             ) : null}
-            <div className="cabana-meta-header-action">
-              <button onClick={this.props.showSaveDbc}>Save DBC</button>
-            </div>
           </div>
         </div>
         <div className="cabana-meta-messages-header">

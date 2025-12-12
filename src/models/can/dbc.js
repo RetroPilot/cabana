@@ -170,7 +170,7 @@ export default class DBC {
     return {};
   }
 
-  createFrame(msgId, size=64) {
+  createFrame(msgId, size=8) {
     const msg = new Frame({
       name: this.nextNewFrameName(),
       id: msgId,
@@ -179,6 +179,23 @@ export default class DBC {
 
     this.messages.set(msgId, msg);
     return msg;
+  }
+
+  suggestFrameSize(messageData) {
+    if (!messageData || !messageData.entries || messageData.entries.length === 0) {
+      return 8; // Default 8 bytes
+    }
+    
+    // Find the maximum actual data length across all entries
+    let maxDataLength = 0;
+    messageData.entries.forEach(entry => {
+      if (entry.data && entry.data.length > maxDataLength) {
+        maxDataLength = entry.data.length;
+      }
+    });
+    
+    // Return size in bytes, default to 8 bytes if no data
+    return maxDataLength > 0 ? maxDataLength : 8;
   }
 
   setSignals(msgId, signals, frameSize) {

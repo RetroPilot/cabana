@@ -1,8 +1,7 @@
 import React, { Component } from 'react';
 import PropTypes from 'prop-types';
 import cx from 'classnames';
-import qs from 'query-string';
-import CommaAuth, { config as AuthConfig } from '@commaai/my-comma-auth';
+import CommaAuth from '@commaai/my-comma-auth';
 
 import { EXPLORER_URL } from '../../config';
 import Modal from './baseModal';
@@ -241,8 +240,8 @@ export default class OnboardingModal extends Component {
     return (
       <Modal
         title="Welcome to Cabana"
-        subtitle="Get started by selecting a drive from connect or enabling live mode"
-        footer={this.renderModalFooter()}
+        subtitle="Get started by enabling live mode or uploading a drive log"
+        // footer={this.renderModalFooter()}
         disableClose
         variations={['wide', 'dark']}
       >
