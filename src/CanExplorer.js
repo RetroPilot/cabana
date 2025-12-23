@@ -16,6 +16,7 @@ import {
 import * as GithubAuth from './api/github-auth';
 
 import DBC from './models/can/dbc';
+import Frame from './models/can/frame';
 import Meta from './components/Meta';
 import Explorer from './components/Explorer';
 import OnboardingModal from './components/Modals/OnboardingModal';
@@ -128,6 +129,7 @@ export default class CanExplorer extends Component {
     this.downloadLogAsCSV = this.downloadLogAsCSV.bind(this);
     this.handleCsvUpload = this.handleCsvUpload.bind(this);
     this.onDbcFilenameChange = this.onDbcFilenameChange.bind(this);
+    this.unloadDbc = this.unloadDbc.bind(this);
 
 
     this.pandaReader = new Panda();
@@ -379,7 +381,9 @@ export default class CanExplorer extends Component {
         return;
       }
       console.log('CSV export progress:', progress);
-      csvData.push(logData);
+      if (logData) {
+        csvData.push(logData);
+      }
     }
 
     if (this.state.live) {
@@ -1147,9 +1151,17 @@ export default class CanExplorer extends Component {
       messages, dbcFilename, dbc, editMessageModalMessage
     } = this.state;
 
+    const frameToSave = messageFrame instanceof Frame
+      ? messageFrame
+      : new Frame({
+        ...messageFrame,
+        transmitters: [...(messageFrame.transmitters || [])],
+        signals: { ...(messageFrame.signals || {}) }
+      });
+
     const message = { ...messages[editMessageModalMessage] };
-    message.frame = messageFrame;
-    dbc.messages.set(messageFrame.id, messageFrame);
+    message.frame = frameToSave;
+    dbc.messages.set(frameToSave.id, frameToSave);
     this.persistDbc({ dbcFilename, dbc });
 
     const updatedMessages = { ...messages };
@@ -1390,6 +1402,47 @@ export default class CanExplorer extends Component {
     this.setState({ dbcFilename: filename });
   }
 
+  unloadDbc() {
+    const newDbc = new DBC();
+    const clearedMessages = {};
+
+    Object.keys(this.state.messages).forEach((key) => {
+      const msg = this.state.messages[key];
+      const entries = (msg.entries || []).map((entry) => ({
+        ...entry,
+        signals: {}
+      }));
+      clearedMessages[key] = {
+        ...msg,
+        frame: null,
+        entries
+      };
+    });
+
+    if (this.fullMessageHistory) {
+      const history = {};
+      Object.keys(this.fullMessageHistory).forEach((key) => {
+        const msg = this.fullMessageHistory[key];
+        const entries = (msg.entries || []).map((entry) => ({
+          ...entry,
+          signals: {}
+        }));
+        history[key] = { ...msg, frame: null, entries };
+      });
+      this.fullMessageHistory = history;
+    }
+
+    this.setState({
+      dbc: newDbc,
+      dbcFilename: NEW_DBC,
+      dbcText: newDbc.text(),
+      dbcLastSaved: null,
+      messages: clearedMessages
+    }, () => {
+      this.persistDbc({ dbcFilename: NEW_DBC, dbc: newDbc });
+    });
+  }
+
 
 
   handleCsvUpload(file) {
@@ -1472,6 +1525,7 @@ export default class CanExplorer extends Component {
             onMessageUnselected={this.onMessageUnselected}
             showLoadDbc={this.showLoadDbc}
             showSaveDbc={this.showSaveDbc}
+            unloadDbc={this.unloadDbc}
             dbcFilename={dbcFilename}
             dbcLastSaved={dbcLastSaved}
             dongleId={this.props.dongleId}

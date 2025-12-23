@@ -44,17 +44,6 @@ export default {
           ]
         }
       ]
-    },
-    {
-      "name": "ySegmentScale",
-      "source": "table",
-      "transform": [
-        {
-          "type": "extent",
-          "field": "y",
-          "signal": "ySegment"
-        }
-      ]
     }
   ],
 
@@ -92,7 +81,7 @@ export default {
       "zero": false,
       "nice": false,
       "domain": {
-        "signal": "ySegment"
+        "signal": "yDomain"
       }
     },
     {
@@ -155,6 +144,13 @@ export default {
         "data": "table",
         "field": "relTime"
       }
+    },
+    {
+      "name": "yDomain",
+      "value": [
+        -1,
+        1
+      ]
     }
   ],
 

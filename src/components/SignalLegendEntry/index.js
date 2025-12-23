@@ -52,6 +52,10 @@ export default class SignalLegendEntry extends Component {
     if (fieldSpec.transform) {
       signalEdited = fieldSpec.transform(value, signalEdited);
     } else {
+      if (fieldSpec.type === 'number') {
+        const num = value === '' ? '' : Number(value);
+        value = Number.isNaN(num) ? '' : num;
+      }
       signalEdited[fieldSpec.field] = value;
     }
 
@@ -80,9 +84,11 @@ export default class SignalLegendEntry extends Component {
         if (
           fieldSpec
           && fieldSpec.type === 'number'
-          && isNaN(parseInt(value, 10))
+          && (value === '' || Number.isNaN(Number(value)))
         ) {
           value = 0;
+        } else if (fieldSpec && fieldSpec.type === 'number') {
+          value = Number(value);
         }
 
         signalCopy[field] = value;

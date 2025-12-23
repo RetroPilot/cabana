@@ -1,32 +1,49 @@
+const SAVVYCAN_LINE_RE = /^\(?\s*([-+]?\d+(?:\.\d+)?)\s*\)?\s+([\w-]+)\s+([0-9A-Fa-f]+)#([0-9A-Fa-f]*)/;
+
 export function parseCSVLog(csvText) {
-  const lines = csvText.trim().split('\n').filter(l => l);
-  if (lines.length < 2) {
+  const lines = csvText
+    .trim()
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l);
+
+  if (!lines.length) {
     throw new Error('CSV file is empty');
   }
 
-  const header = lines[0].split(',');
-  if (header[0] !== 'time' || header[1] !== 'addr' || header[2] !== 'bus' || header[3] !== 'data') {
-    throw new Error('Invalid CSV format');
+  const header = lines[0].replace(/"/g, '').toLowerCase();
+  const hasLegacyHeader = header === 'time,addr,bus,data';
+  const looksLikeSavvyCan = SAVVYCAN_LINE_RE.test(lines[0]);
+
+  if (!hasLegacyHeader && !looksLikeSavvyCan) {
+    throw new Error('Invalid CSV format: expected cabana CSV header or SavvyCAN candump lines');
   }
 
   const messages = {};
   let firstTime = null;
+  let lastTime = null;
 
-  for (let i = 1; i < lines.length; i++) {
-    const parts = lines[i].split(',');
-    if (parts.length !== 4) continue;
+  const parser = hasLegacyHeader ? parseLegacyLine : parseSavvyCanLine;
+  const startIndex = hasLegacyHeader ? 1 : 0;
 
-    const time = parseFloat(parts[0]);
-    const address = parseInt(parts[1], 10);
-    const bus = parseInt(parts[2]);
-    const hexData = parts[3].trim();
+  for (let i = startIndex; i < lines.length; i++) {
+    const parsed = parser(lines[i]);
+    if (!parsed) {
+      throw new Error(`Invalid CSV format on line ${i + 1}`);
+    }
+
+    const {
+      time, address, bus, hexData
+    } = parsed;
 
     if (firstTime === null) {
       firstTime = time;
     }
+    lastTime = time;
 
-    const data = hexToBytes(hexData);
+    const relTime = time - firstTime;
     const messageId = `${bus}:${address}`;
+    const entrySize = Math.max(8, Math.ceil(hexData.length / 2));
 
     if (!messages[messageId]) {
       messages[messageId] = {
@@ -34,23 +51,30 @@ export function parseCSVLog(csvText) {
         address,
         bus,
         entries: [],
-        byteStateChangeCounts: new Array(8).fill(0),
-        byteColors: new Array(8).fill('rgba(0,0,0,0)'),
+        byteStateChangeCounts: new Array(entrySize).fill(0),
+        byteColors: new Array(entrySize).fill('rgba(0,0,0,0)'),
         frame: null
       };
+    } else if (messages[messageId].byteStateChangeCounts.length < entrySize) {
+      const extra = entrySize - messages[messageId].byteStateChangeCounts.length;
+      messages[messageId].byteStateChangeCounts =
+        messages[messageId].byteStateChangeCounts.concat(new Array(extra).fill(0));
+      messages[messageId].byteColors =
+        messages[messageId].byteColors.concat(new Array(extra).fill('rgba(0,0,0,0)'));
     }
 
-    const paddedHexData = hexData.padEnd(16, '0');
-    const relTime = time - firstTime;
-    
-    // Calculate byte state changes
-    const entryByteChangeCounts = new Array(8).fill(0);
+    const messageSize = messages[messageId].byteStateChangeCounts.length;
+    const paddedHexData = hexData.padEnd(messageSize * 2, '0');
+
+    const entryByteChangeCounts = new Array(messageSize).fill(0);
     const lastEntry = messages[messageId].entries[messages[messageId].entries.length - 1];
-    
+
     if (lastEntry) {
-      for (let byteIdx = 0; byteIdx < Math.min(8, paddedHexData.length / 2); byteIdx++) {
-        const currentByte = paddedHexData.substr(byteIdx * 2, 2);
-        const lastByte = lastEntry.hexData.substr(byteIdx * 2, 2);
+      const lastPaddedHex = lastEntry.hexData.padEnd(messageSize * 2, '0');
+      for (let byteIdx = 0; byteIdx < messageSize; byteIdx++) {
+        const offset = byteIdx * 2;
+        const currentByte = paddedHexData.substr(offset, 2);
+        const lastByte = lastPaddedHex.substr(offset, 2);
         if (currentByte !== lastByte) {
           entryByteChangeCounts[byteIdx] = 1;
           messages[messageId].byteStateChangeCounts[byteIdx]++;
@@ -63,37 +87,113 @@ export function parseCSVLog(csvText) {
       relTime,
       address,
       bus,
-      data: new Uint8Array(data),
-      hexData: paddedHexData,
+      data: new Uint8Array(hexToBytes(hexData)),
+      hexData,
       signals: {},
       byteStateChangeCounts: entryByteChangeCounts
     });
   }
 
-  // Calculate byte colors based on state change counts
-  Object.values(messages).forEach(message => {
+  if (firstTime === null) {
+    throw new Error('No log entries found in CSV');
+  }
+
+  Object.values(messages).forEach((message) => {
     const maxChanges = Math.max(...message.byteStateChangeCounts, 1);
-    message.byteColors = message.byteStateChangeCounts.map(count => {
+    message.byteColors = message.byteStateChangeCounts.map((count) => {
       const intensity = Math.min(255, 75 + 180 * (count / maxChanges));
       return `rgb(${Math.round(intensity)},0,0)`;
     });
   });
 
-  const lastTime = lines.length > 1 ? parseFloat(lines[lines.length - 1].split(',')[0]) : firstTime;
-  const duration = lastTime - firstTime;
-  
+  const duration = lastTime !== null ? lastTime - firstTime : 0;
+
   return {
     messages,
-    firstCanTime: firstTime || 0,
+    firstCanTime: firstTime,
     duration
   };
 }
 
+function parseLegacyLine(line) {
+  const parts = line.split(',');
+  if (parts.length !== 4) return null;
+
+  const time = parseFloat(parts[0]);
+  const address = parseAddress(parts[1]);
+  const bus = parseInt(parts[2], 10);
+  const hexData = normalizeHexData(parts[3]);
+
+  if ([time, address, bus].some((v) => Number.isNaN(v))) {
+    return null;
+  }
+
+  return {
+    time,
+    address,
+    bus,
+    hexData
+  };
+}
+
+function parseSavvyCanLine(line) {
+  const match = SAVVYCAN_LINE_RE.exec(line);
+  if (!match) {
+    return null;
+  }
+
+  const time = parseFloat(match[1]);
+  const bus = parseBus(match[2]);
+  const address = parseAddress(match[3], 16);
+  const hexData = normalizeHexData(match[4]);
+
+  if ([time, address, bus].some((v) => Number.isNaN(v))) {
+    return null;
+  }
+
+  return {
+    time,
+    address,
+    bus,
+    hexData
+  };
+}
+
+function parseAddress(addressStr, baseHint) {
+  if (!addressStr) {
+    return NaN;
+  }
+  const trimmed = addressStr.trim();
+  const isHex = baseHint === 16 || trimmed.startsWith('0x') || /[a-f]/i.test(trimmed);
+  return parseInt(trimmed, isHex ? 16 : 10);
+}
+
+function parseBus(busStr) {
+  if (busStr === null || busStr === undefined) {
+    return NaN;
+  }
+  const match = `${busStr}`.match(/(\d+)$/);
+  if (match) {
+    return parseInt(match[1], 10);
+  }
+  const busNum = parseInt(busStr, 10);
+  return Number.isNaN(busNum) ? NaN : busNum;
+}
+
+function normalizeHexData(hex) {
+  const normalized = (hex || '').replace(/\s+/g, '').toUpperCase();
+  if (!normalized) {
+    return normalized;
+  }
+  return normalized.length % 2 === 1 ? `0${normalized}` : normalized;
+}
+
 function hexToBytes(hex) {
-  if (!hex) return [];
+  const cleanHex = normalizeHexData(hex);
+  if (!cleanHex) return [];
   const bytes = [];
-  for (let i = 0; i < hex.length; i += 2) {
-    bytes.push(parseInt(hex.substr(i, 2), 16));
+  for (let i = 0; i < cleanHex.length; i += 2) {
+    bytes.push(parseInt(cleanHex.substr(i, 2), 16));
   }
   return bytes;
 }

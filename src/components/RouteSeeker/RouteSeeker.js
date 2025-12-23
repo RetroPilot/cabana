@@ -154,7 +154,18 @@ export default class RouteSeeker extends Component {
 
   executePlayTimer() {
     const { videoElement } = this.props;
-    
+    const hasSegment = this.props.segment && this.props.segment.length === 2;
+    const segmentStart = hasSegment
+      ? this.props.segment[0]
+      : (this.props.startTime || 0);
+    const segmentLength = hasSegment
+      ? this.props.segment[1] - this.props.segment[0]
+      : this.props.videoLength;
+    if (segmentLength <= 0) {
+      this.playTimer = window.requestAnimationFrame(this.executePlayTimer);
+      return;
+    }
+
     if (videoElement === null && this.props.videoLength > 0) {
       // CSV playback without video
       const now = Date.now();
@@ -164,9 +175,8 @@ export default class RouteSeeker extends Component {
       const elapsed = (now - this.lastPlayTime) / 1000;
       this.lastPlayTime = now;
       
-      const { segment, videoLength } = this.props;
-      const effectiveLength = segment && segment.length === 2 ? segment[1] - segment[0] : videoLength;
-      const startOffset = segment && segment.length === 2 ? segment[0] : 0;
+      const effectiveLength = segmentLength;
+      const startOffset = segmentStart;
       
       let newRatio = this.state.ratio + (elapsed / effectiveLength);
       if (newRatio >= 1) {
@@ -186,12 +196,11 @@ export default class RouteSeeker extends Component {
       return;
     }
 
-    let { videoLength, startTime } = this.props;
     let { currentTime } = videoElement;
 
     currentTime = roundTime(currentTime);
-    startTime = roundTime(startTime);
-    videoLength = roundTime(videoLength);
+    const startTime = roundTime(segmentStart);
+    const videoLength = roundTime(segmentLength || this.props.videoLength);
 
     let newRatio = (currentTime - startTime) / videoLength;
 
@@ -203,10 +212,10 @@ export default class RouteSeeker extends Component {
     if (newRatio >= 1 || newRatio < 0) {
       newRatio = 0;
       currentTime = startTime;
-      this.props.onUserSeek(newRatio);
-      if (newRatio >= 1 && !this.props.segment) {
-        // Don't pause, just loop
+      if (videoElement.currentTime !== startTime) {
+        videoElement.currentTime = startTime;
       }
+      this.props.onUserSeek(newRatio);
     }
 
     if (newRatio >= 0) {

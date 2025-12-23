@@ -43,9 +43,15 @@ function clipSegment(_segment, _segmentIndices, nextMessage) {
 
 export default class Explorer extends Component {
   updateSegment = debounce((messageId, _segment) => {
-    let segment = _segment;
-    const { messages, selectedMessage, currentParts } = this.props;
-    const { entries } = messages[selectedMessage];
+    let segment = Array.isArray(_segment) ? [..._segment] : [];
+    segment.sort((a, b) => a - b);
+    const { messages, currentParts } = this.props;
+    const targetMessageId = messageId || this.props.selectedMessage;
+    const message = messages[targetMessageId];
+    if (!message || !message.entries || !message.entries.length) {
+      return;
+    }
+    const { entries } = message;
     let segmentIndices = Entries.findSegmentIndices(entries, segment, true);
 
     // console.log(this.state.segment, '->', segment, segmentIndices);
@@ -434,13 +440,7 @@ export default class Explorer extends Component {
 
     const { thumbnails, messages, startTime } = this.props;
 
-    let graphSegment = this.state.segment;
-    if (!graphSegment.length && this.props.currentParts) {
-      graphSegment = [
-        this.props.currentParts[0] * 60,
-        (this.props.currentParts[1] + 1) * 60
-      ];
-    }
+    const graphSegment = this.state.segment;
     return (
       <div className="cabana-explorer">
         <div className={cx('cabana-explorer-signals', signalsExpandedClass)}>

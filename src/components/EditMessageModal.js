@@ -17,11 +17,11 @@ export default class EditMessageModal extends Component {
     // Create a temporary frame if one doesn't exist
     let frameToEdit;
     if (props.message.frame) {
-      frameToEdit = {
+      frameToEdit = new Frame({
         ...props.message.frame,
-        transmitters: [...props.message.frame.transmitters],
-        signals: { ...props.message.frame.signals }
-      };
+        transmitters: [...(props.message.frame.transmitters || [])],
+        signals: { ...(props.message.frame.signals || {}) }
+      });
     } else {
       // Create a temporary frame for editing
       frameToEdit = new Frame({

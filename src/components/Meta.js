@@ -39,6 +39,7 @@ export default class Meta extends Component {
     partsCount: PropTypes.number,
     showLoadDbc: PropTypes.func,
     showSaveDbc: PropTypes.func,
+    unloadDbc: PropTypes.func,
     dbcFilename: PropTypes.string,
     dbcLastSaved: PropTypes.object, // moment.js object,
     showEditMessageModal: PropTypes.func,
@@ -407,6 +408,11 @@ export default class Meta extends Component {
             <div className="cabana-meta-header-action">
               <button className="button--wide" onClick={this.props.showSaveDbc}>
                 <i className="fa fa-save" /> Save DBC
+              </button>
+            </div>
+            <div className="cabana-meta-header-action">
+              <button className="button--wide" onClick={this.props.unloadDbc}>
+                <i className="fa fa-eject" /> Unload DBC
               </button>
             </div>
             {this.props.shareUrl ? (

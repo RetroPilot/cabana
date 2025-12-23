@@ -10,7 +10,7 @@ const window = self;
 
 const { Int64LE } = require('int64-buffer');
 
-function transformAndSend(rawData) {
+function transformAndSend(rawData, canStartTime) {
   let totalSize = 0;
   const maxTime = rawData.reduce((memo, sourceData) => {
     totalSize += sourceData.entries.length;
@@ -74,7 +74,7 @@ function transformAndSend(rawData) {
     curIndexes[nextSource.id]++;
     totalEntries++;
 
-    entryBuffer.push(makeEntry(nextSource));
+    entryBuffer.push(makeEntry(nextSource, canStartTime));
 
     if (entryBuffer.length > 5000) {
       self.postMessage({
@@ -107,13 +107,25 @@ function transformAndSend(rawData) {
   }
 }
 
-function makeEntry(nextSource) {
-  return [
-    nextSource.entry.relTime,
-    nextSource.address,
-    nextSource.bus,
-    nextSource.entry.hexData
-  ].join(',');
+function makeEntry(nextSource, canStartTime) {
+  const hasStartTime = Number.isFinite(canStartTime);
+  const relTime = Number.isFinite(nextSource.entry.relTime) ? nextSource.entry.relTime : 0;
+  const timestamp = hasStartTime
+    ? canStartTime + relTime
+    : relTime;
+
+  const addressHex = formatAddress(nextSource.address);
+  const dataHex = (nextSource.entry.hexData || '').toUpperCase();
+  const busLabel = `can${Number.isFinite(nextSource.bus) ? nextSource.bus : 0}`;
+
+  return `(${timestamp.toFixed(6)}) ${busLabel} ${addressHex}#${dataHex}`;
+}
+
+function formatAddress(address) {
+  const addr = Number.isFinite(address) ? address : 0;
+  const isExtended = addr > 0x7ff;
+  const width = isExtended ? 8 : 3;
+  return addr.toString(16).toUpperCase().padStart(width, '0');
 }
 
 function findFirstEntryIndex(entries, minTime, start, length) {
@@ -163,7 +175,6 @@ self.onmessage = function (e) {
   console.log('onmessage worker');
   self.postMessage({
     progress: 0,
-    logData: 'time,addr,bus,data',
     shouldClose: false
   });
   const {

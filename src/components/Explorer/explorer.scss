@@ -334,6 +334,21 @@
           width: 100%;
         }
       }
+      &-controls {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin: 5px 0 10px $drag-anchor-width;
+        &-group {
+          display: flex;
+          gap: 6px;
+        }
+        .t-smallcaps {
+          color: $color-grey-60;
+          font-size: 11px;
+          letter-spacing: 0.05em;
+        }
+      }
     }
   }
 }

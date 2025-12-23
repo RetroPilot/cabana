@@ -41,14 +41,19 @@ export default class CanGraph extends Component {
   constructor(props) {
     super(props);
 
+    const initialData = this.getGraphData(props);
+    const initialYDomain = initialData.yDomain;
+
     this.state = {
       plotInnerStyle: null,
       shiftX: 0,
       shiftY: 0,
       bounds: null,
       isDataInserted: false,
-      data: this.getGraphData(props),
-      spec: this.getGraphSpec(props)
+      data: initialData,
+      yDomain: initialYDomain,
+      userYDomain: null,
+      spec: this.getGraphSpec(props, initialYDomain)
     };
     this.onNewView = this.onNewView.bind(this);
     this.onSignalClickTime = this.onSignalClickTime.bind(this);
@@ -58,11 +63,16 @@ export default class CanGraph extends Component {
     this.onDragStart = this.onDragStart.bind(this);
     this.onPlotResize = this.onPlotResize.bind(this);
     this.insertData = this.insertData.bind(this);
+    this.resetYZoom = this.resetYZoom.bind(this);
+    this.zoomYAxis = this.zoomYAxis.bind(this);
+    this.panYAxis = this.panYAxis.bind(this);
   }
 
   getGraphData(props) {
     let firstRelTime = -1;
     let lastRelTime = -1;
+    let minY = Infinity;
+    let maxY = -Infinity;
     let allSeries = props.plottedSignals
       .map((signals) => {
         const { messageId, signalUid } = signals;
@@ -83,37 +93,117 @@ export default class CanGraph extends Component {
           0
         );
       })
+      .filter((v) => Array.isArray(v))
       .reduce((m, v) => m.concat(v), []);
-
-    // Filter to 60-second window if time > 60
-    if (props.segment.length === 0 && props.currentTime > 60) {
-      const windowStart = props.currentTime - 60;
-      allSeries = allSeries.filter(d => d.relTime >= windowStart && d.relTime <= props.currentTime);
-    }
 
     // Sort all series by relTime to fix jittery lines
     allSeries.sort((a, b) => a.relTime - b.relTime);
+
+    allSeries.forEach(({ y }) => {
+      if (!Number.isNaN(y)) {
+        minY = Math.min(minY, y);
+        maxY = Math.max(maxY, y);
+      }
+    });
 
     return {
       updated: Date.now(),
       series: allSeries,
       firstRelTime,
-      lastRelTime
+      lastRelTime,
+      yDomain: this.expandYDomain(minY, maxY)
     };
   }
 
-  getGraphSpec(props) {
+  expandYDomain(minY, maxY) {
+    if (!Number.isFinite(minY) || !Number.isFinite(maxY)) {
+      return [-1, 1];
+    }
+
+    if (minY === maxY) {
+      const pad = Math.max(Math.abs(minY) * 0.1, 1);
+      return [minY - pad, maxY + pad];
+    }
+
+    const span = maxY - minY;
+    const pad = Math.max(span * 0.05, Number.EPSILON);
+    return [minY - pad, maxY + pad];
+  }
+
+  currentYDomain(dataOverride) {
+    const domain = this.state.userYDomain
+      || (dataOverride ? dataOverride.yDomain : this.state.yDomain);
+    if (!domain || domain.length !== 2) {
+      return [-1, 1];
+    }
+    return domain;
+  }
+
+  applyYDomainToView(domain) {
+    if (this.view && domain) {
+      this.view.signal('yDomain', domain);
+      this.view.runAsync();
+    }
+  }
+
+  zoomYAxis(factor) {
+    const domain = this.currentYDomain();
+    const span = Math.max(domain[1] - domain[0], Number.EPSILON);
+    const newSpan = span * factor;
+    const center = (domain[0] + domain[1]) / 2;
+    const newDomain = [center - newSpan / 2, center + newSpan / 2];
+
+    this.setState({
+      userYDomain: newDomain
+    }, () => {
+      this.applyYDomainToView(newDomain);
+    });
+  }
+
+  resetYZoom() {
+    const domain = this.state.yDomain || [-1, 1];
+    this.setState({
+      userYDomain: null
+    }, () => {
+      this.applyYDomainToView(domain);
+    });
+  }
+
+  panYAxis(direction = 1) {
+    const domain = this.currentYDomain();
+    const span = Math.max(domain[1] - domain[0], Number.EPSILON);
+    const shift = span * 0.1 * direction;
+    const newDomain = [domain[0] + shift, domain[1] + shift];
+
+    this.setState({ userYDomain: newDomain }, () => {
+      this.applyYDomainToView(newDomain);
+    });
+  }
+
+  getGraphSpec(props, yDomain) {
+    const scales = [...CanPlotSpec.scales];
+
+    const signals = CanPlotSpec.signals.map((signalSpec) => {
+      if (signalSpec.name === 'yDomain') {
+        return {
+          ...signalSpec,
+          value: yDomain || signalSpec.value
+        };
+      }
+      return signalSpec;
+    });
+
     return {
       ...CanPlotSpec,
-      scales: [
-        {
-          ...CanPlotSpec.scales[0],
-          domainMin: props.segment[0],
-          domainMax: props.segment[1]
-        },
-        ...CanPlotSpec.scales.slice(1)
-      ]
+      scales,
+      signals
     };
+  }
+
+  debugLog(msg, payload) {
+    if (console && console.log) {
+      console.log('[CanGraph]', msg, payload);
+    }
   }
 
   segmentIsNew(newSegment) {
@@ -153,6 +243,43 @@ export default class CanGraph extends Component {
     this.view.run();
   }, 100);
 
+  computeSegmentDomain(props = this.props, data = this.state.data) {
+    const hasSegment = props.segment && props.segment.length === 2;
+    if (hasSegment) {
+      this.debugLog('segment domain (brush)', {
+        domain: props.segment,
+        currentTime: props.currentTime
+      });
+      return props.segment;
+    }
+
+    const lastTime = data ? data.lastRelTime : 0;
+    const currentTimeNum = Number(props.currentTime);
+    const t = Number.isFinite(currentTimeNum) ? currentTimeNum : lastTime;
+    const windowSize = 60;
+
+    if (t > windowSize) {
+      const domain = [t - windowSize, t];
+      this.debugLog('segment domain (auto sliding)', {
+        domain,
+        currentTime: currentTimeNum,
+        lastTime
+      });
+      return domain;
+    }
+
+    const cappedLastTime = Number.isFinite(lastTime) ? lastTime : 0;
+    const cappedT = Number.isFinite(t) ? t : 0;
+    const upper = Math.min(windowSize, Math.max(cappedT, cappedLastTime, 0)) || windowSize;
+    const domain = [0, upper];
+    this.debugLog('segment domain (start window)', {
+      domain,
+      currentTime: currentTimeNum,
+      lastTime
+    });
+    return domain;
+  }
+
   insertData = debounce(() => {
     if (!this.view) {
       return;
@@ -176,37 +303,38 @@ export default class CanGraph extends Component {
 
     if (prevProps.messages !== this.props.messages || prevProps.plottedSignal !== this.props.plottedSignal) {
       const data = this.getGraphData(this.props);
-      this.setState({ data });
+      const nextYDomain = this.state.userYDomain || data.yDomain;
+
+      this.setState({
+        data,
+        yDomain: data.yDomain,
+        spec: this.view ? this.state.spec : this.getGraphSpec(this.props, nextYDomain)
+      }, () => {
+        this.applyYDomainToView(nextYDomain);
+      });
+    }
+
+    if (prevProps.currentTime !== this.props.currentTime && this.view) {
+      const domain = this.computeSegmentDomain(this.props, this.state.data);
+      this.view.signal('segment', domain);
+      this.view.signal('videoTime', this.props.currentTime);
+      this.view.runAsync();
     }
     if (this.segmentIsNew(this.props.segment)) {
-      this.setState({ spec: this.getGraphSpec(this.props) });
-    } else if (this.props.segment.length === 0 && this.props.currentTime > 60) {
-      // Update spec to show 60-second window
-      const windowStart = this.props.currentTime - 60;
-      this.setState({ 
-        spec: {
-          ...CanPlotSpec,
-          scales: [
-            {
-              ...CanPlotSpec.scales[0],
-              domainMin: windowStart,
-              domainMax: this.props.currentTime
-            },
-            ...CanPlotSpec.scales.slice(1)
-          ]
-        }
+      this.setState({
+        spec: this.getGraphSpec(this.props, this.currentYDomain())
       });
     }
 
     if (this.view) {
-      if (this.props.segment.length > 0 && this.props.currentTime <= this.props.segment[1]) {
-        this.view.signal('segment', this.props.segment);
-      } else if (this.props.currentTime > 60) {
-        const domain = [this.props.currentTime - 60, this.props.currentTime];
-        this.view.signal('segment', domain);
-      } else {
-        this.view.signal('segment', 0);
+      const domain = this.computeSegmentDomain(this.props, this.state.data);
+      if (this.props.currentTime !== undefined && this.props.currentTime !== prevProps.currentTime) {
+        this.debugLog('currentTime change', {
+          currentTime: this.props.currentTime,
+          domain
+        });
       }
+      this.view.signal('segment', domain);
       if (this.props.currentTime !== undefined) {
         this.view.signal('videoTime', this.props.currentTime);
       }
@@ -214,27 +342,8 @@ export default class CanGraph extends Component {
     }
   }
 
-  shouldComponentUpdate(nextProps, nextState) {
-    if (!this.view) {
-      return true;
-    }
-    
-    if (this.props.currentTime !== nextProps.currentTime) {
-      return true;
-    }
-    
-    if (this.props.messages !== nextProps.messages || this.props.plottedSignal !== nextProps.plottedSignal ||
-      this.segmentIsNew(nextProps.segment) || this.state.spec !== nextState.spec)
-    {
-      return true;
-    }
-    
-    if (this.state.data !== nextState.data) {
-      this.insertData();
-    }
-    
-    this.view.runAsync();
-    return false;
+  shouldComponentUpdate() {
+    return true;
   }
 
   updateStyleFromDragPos({ left, top }) {
@@ -250,9 +359,10 @@ export default class CanGraph extends Component {
     if (this.state.bounds) {
       this.onPlotResize();
     }
-    if (this.props.segment.length > 0) {
-      view.signal('segment', this.props.segment);
-    }
+    this.applyYDomainToView(this.currentYDomain());
+    const domain = this.computeSegmentDomain(this.props, this.state.data);
+    this.debugLog('onNewView domain init', domain);
+    view.signal('segment', domain);
     view.signal('videoTime', this.props.currentTime);
 
     this.insertData();
@@ -267,11 +377,20 @@ export default class CanGraph extends Component {
 
   onSignalSegment(signal, segment) {
     // console.log('onSignalSegment', signal, segment);
-    if (!Array.isArray(segment)) {
+    if (!Array.isArray(segment) || segment.length !== 2) {
       return;
     }
 
-    this.props.onSegmentChanged(this.props.messageId, segment);
+    const cleanedSegment = segment
+      .map((v) => Number(v))
+      .filter((v) => Number.isFinite(v))
+      .sort((a, b) => a - b);
+
+    if (cleanedSegment.length !== 2 || cleanedSegment[0] === cleanedSegment[1]) {
+      return;
+    }
+
+    this.props.onSegmentChanged(this.props.messageId, cleanedSegment);
 
     if (!this.view) {
       return;
@@ -413,6 +532,68 @@ export default class CanGraph extends Component {
               </div>
             )}
           </Measure>
+          <div
+            className="cabana-explorer-visuals-plot-controls"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: 12,
+              marginTop: 10
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span className="t-smallcaps">Y Zoom</span>
+              <div
+                className="cabana-explorer-visuals-plot-controls-group"
+                style={{ display: 'flex', gap: 8 }}
+              >
+                <button
+                  className="button--tiny"
+                  onClick={() => this.zoomYAxis(0.5)}
+                  style={{ minWidth: 32, paddingLeft: 10, paddingRight: 10 }}
+                >
+                  +
+                </button>
+                <button
+                  className="button--tiny"
+                  onClick={() => this.zoomYAxis(2)}
+                  style={{ minWidth: 32, paddingLeft: 10, paddingRight: 10 }}
+                >
+                  -
+                </button>
+              </div>
+              <span className="t-smallcaps">Y Pan</span>
+              <div
+                className="cabana-explorer-visuals-plot-controls-group"
+                style={{ display: 'flex', gap: 8 }}
+              >
+                <button
+                  className="button--tiny"
+                  onClick={() => this.panYAxis(1)}
+                  style={{ minWidth: 32, paddingLeft: 10, paddingRight: 10 }}
+                >
+                  ↑
+                </button>
+                <button
+                  className="button--tiny"
+                  onClick={() => this.panYAxis(-1)}
+                  style={{ minWidth: 32, paddingLeft: 10, paddingRight: 10 }}
+                >
+                  ↓
+                </button>
+              </div>
+            </div>
+            <div style={{ marginLeft: 'auto' }}>
+              <button
+                className="button--tiny"
+                onClick={this.resetYZoom}
+              >
+                Reset
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     );

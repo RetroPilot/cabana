@@ -115,8 +115,18 @@ export default class DBC {
     txt += `\nBU_: ${boardUnitsText}\n\n\n`;
 
     const frames = [];
-    for (const frame of this.messages.values()) {
-      frames.push(frame);
+    for (const [id, frame] of this.messages.entries()) {
+      const normalizedFrame = frame instanceof Frame
+        ? frame
+        : new Frame({
+          ...frame,
+          transmitters: [...(frame.transmitters || [])],
+          signals: { ...(frame.signals || {}) }
+        });
+      if (normalizedFrame !== frame) {
+        this.messages.set(id, normalizedFrame);
+      }
+      frames.push(normalizedFrame);
     }
     txt += `${frames.map((f) => f.text()).join('\n\n')}\n\n`;
 
