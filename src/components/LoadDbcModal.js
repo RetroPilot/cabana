@@ -1,42 +1,25 @@
 import React, { Component } from 'react';
 import PropTypes from 'prop-types';
-import cx from 'classnames';
-
 import DBC from '../models/can/dbc';
-import OpenDbc from '../api/OpenDbc';
 import Modal from './Modals/baseModal';
-import GithubDbcList from './GithubDbcList';
 import DbcUpload from './DbcUpload';
 
 export default class LoadDbcModal extends Component {
   static propTypes = {
     handleClose: PropTypes.func.isRequired,
-    onDbcSelected: PropTypes.func.isRequired,
-    openDbcClient: PropTypes.instanceOf(OpenDbc).isRequired,
-    loginWithGithub: PropTypes.element.isRequired
+    onDbcSelected: PropTypes.func.isRequired
   };
 
   constructor(props) {
     super(props);
     this.state = {
-      tab: 'OpenDBC',
-      tabs: ['OpenDBC', 'GitHub', 'Upload'],
       dbc: null,
-      dbcSource: null,
-      userOpenDbcRepo: null
+      dbcSource: null
     };
 
     this.onDbcLoaded = this.onDbcLoaded.bind(this);
     this.handleSave = this.handleSave.bind(this);
-    this.renderTabNavigation = this.renderTabNavigation.bind(this);
-    this.renderTabContent = this.renderTabContent.bind(this);
     this.renderActions = this.renderActions.bind(this);
-  }
-
-  componentDidMount() {
-    this.props.openDbcClient.getUserOpenDbcFork().then((userOpenDbcRepo) => {
-      this.setState({ userOpenDbcRepo });
-    });
   }
 
   onDbcLoaded(dbcSource, dbcText) {
@@ -47,59 +30,6 @@ export default class LoadDbcModal extends Component {
   handleSave() {
     const { dbc, dbcSource } = this.state;
     this.props.onDbcSelected(dbcSource, dbc);
-  }
-
-  renderTabNavigation() {
-    return (
-      <div className="cabana-tabs-navigation">
-        {this.state.tabs.map((tab) => (
-          <button
-            className={cx({ 'is-active': this.state.tab === tab })}
-            onClick={() => {
-              this.setState({
-                tab,
-                dbc: null,
-                dbcSource: null,
-              });
-            }}
-            key={tab}
-          >
-            <span>{tab}</span>
-          </button>
-        ))}
-      </div>
-    );
-  }
-
-  renderTabContent() {
-    const { tab } = this.state;
-    if (tab === 'OpenDBC') {
-      return (
-        <GithubDbcList
-          onDbcLoaded={this.onDbcLoaded}
-          repo="commaai/opendbc"
-          openDbcClient={this.props.openDbcClient}
-        />
-      );
-    }
-    if (tab === 'GitHub') {
-      if (!this.props.openDbcClient.hasAuth()) {
-        return this.props.loginWithGithub;
-      }
-      if (this.state.userOpenDbcRepo === null) {
-        return <div>Fork it</div>;
-      }
-      return (
-        <GithubDbcList
-          onDbcLoaded={this.onDbcLoaded}
-          repo={this.state.userOpenDbcRepo}
-          openDbcClient={this.props.openDbcClient}
-        />
-      );
-    }
-    if (tab === 'Upload') {
-      return <DbcUpload onDbcLoaded={this.onDbcLoaded} />;
-    }
   }
 
   renderActions(disabled) {
@@ -121,10 +51,9 @@ export default class LoadDbcModal extends Component {
         title="Load DBC File"
         subtitle="Modify an existing DBC file with Cabana"
         handleClose={this.props.handleClose}
-        navigation={this.renderTabNavigation()}
         actions={this.renderActions(Boolean(this.state.dbc === null))}
       >
-        {this.renderTabContent()}
+        <DbcUpload onDbcLoaded={this.onDbcLoaded} />
       </Modal>
     );
   }

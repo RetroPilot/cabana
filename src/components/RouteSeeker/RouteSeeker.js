@@ -16,7 +16,8 @@ export default class RouteSeeker extends Component {
     playing: PropTypes.bool,
     segmentProgress: PropTypes.func,
     ratioTime: PropTypes.func,
-    nearestFrameTime: PropTypes.number
+    nearestFrameTime: PropTypes.number,
+    playSpeed: PropTypes.number
   };
 
   static hiddenMarkerStyle = { display: 'none', left: 0 };
@@ -172,7 +173,7 @@ export default class RouteSeeker extends Component {
       if (!this.lastPlayTime) {
         this.lastPlayTime = now;
       }
-      const elapsed = (now - this.lastPlayTime) / 1000;
+      const elapsed = ((now - this.lastPlayTime) / 1000) * (this.props.playSpeed || 1);
       this.lastPlayTime = now;
       
       const effectiveLength = segmentLength;

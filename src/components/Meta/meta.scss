@@ -31,6 +31,10 @@
     }
     &-actions {
       padding: 18px 0;
+      min-width: 620px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 12px;
     }
     .saveable &-action {
       width: 22%;
@@ -42,14 +46,18 @@
       float: left;
       padding: 0 1%;
       width: 22%; /* 22% by default. 33.33% for copy via .special-wide */
-      &:first-child {
-        padding-left: 0;
-      }
-      &:last-child {
-        padding-right: 0;
-      }
+      display: flex;
+      align-items: center;
       button {
         width: 100%;
+      }
+      &.j1939-toggle {
+        width: auto;
+        padding-top: 6px;
+        padding-bottom: 6px;
+        label {
+          cursor: pointer;
+        }
       }
     }
     & .special-wide {
@@ -62,8 +70,11 @@
     height: 100%;
     padding-left: 11px;
     &-header {
-      height: 34px;
-      padding: 22px 11px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 11px;
+      flex-wrap: wrap;
     }
     &-window {
       background: $color-grey-30;

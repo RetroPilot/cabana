@@ -32,6 +32,8 @@ import {
 import OpenDbc from './api/OpenDbc';
 import UnloggerClient from './api/unlogger';
 import { parseCSVLog } from './api/csv-loader';
+import Signal from './models/can/signal';
+import j1939Baseline from './j1939_baseline.json';
 import { hash } from './utils/string';
 import { modifyQueryParameters } from './utils/url';
 import DbcUtils from './utils/dbc';
@@ -90,6 +92,7 @@ export default class CanExplorer extends Component {
       shareUrl: null,
       logUrls: null,
       share: null,
+      j1939Enabled: false,
     };
 
     this.openDbcClient = new OpenDbc(props.githubAuthToken);
@@ -130,6 +133,12 @@ export default class CanExplorer extends Component {
     this.handleCsvUpload = this.handleCsvUpload.bind(this);
     this.onDbcFilenameChange = this.onDbcFilenameChange.bind(this);
     this.unloadDbc = this.unloadDbc.bind(this);
+    this.applyJ1939Baseline = this.applyJ1939Baseline.bind(this);
+    this.buildJ1939FrameFromBaseline = this.buildJ1939FrameFromBaseline.bind(this);
+    this.mergeJ1939BaselineIntoDbc = this.mergeJ1939BaselineIntoDbc.bind(this);
+    this.stripBaselineFromDbc = this.stripBaselineFromDbc.bind(this);
+    this.reparseMessagesWithDbc = this.reparseMessagesWithDbc.bind(this);
+    this.toggleJ1939Enabled = this.toggleJ1939Enabled.bind(this);
 
 
     this.pandaReader = new Panda();
@@ -273,7 +282,7 @@ export default class CanExplorer extends Component {
   }
 
   onDbcSelected(dbcFilename, dbc) {
-    const { route, csvPlayback, messages, firstCanTime } = this.state;
+    const { route, csvPlayback, messages, firstCanTime, j1939Enabled } = this.state;
     this.hideLoadDbc();
     dbc.lastUpdated = Date.now();
     this.persistDbc({ dbcFilename, dbc });
@@ -293,11 +302,24 @@ export default class CanExplorer extends Component {
         }
       );
     } else if (csvPlayback) {
+      if (j1939Enabled) {
+        dbc = this.mergeJ1939BaselineIntoDbc(dbc, messages);
+      }
+
       // Re-parse CSV messages with new DBC
       const updatedMessages = { ...messages };
       Object.keys(updatedMessages).forEach((key) => {
         const msg = { ...updatedMessages[key] };
         msg.frame = dbc.getMessageFrame(msg.address);
+        if (!msg.frame) {
+          // attempt to build from baseline if available
+          const firstJ = j1939Enabled && msg.entries && msg.entries.find((e) => e.j1939 && (j1939Baseline || {})[e.j1939.pgn]);
+          if (firstJ && j1939Enabled) {
+            const def = (j1939Baseline || {})[firstJ.j1939.pgn];
+            msg.frame = this.buildJ1939FrameFromBaseline(firstJ.j1939.pgn, def, msg.address);
+            dbc.messages.set(msg.address, msg.frame);
+          }
+        }
         msg.entries = [...msg.entries];
         let prevEntry = null;
         const byteStateChangeCounts = [];
@@ -1402,6 +1424,185 @@ export default class CanExplorer extends Component {
     this.setState({ dbcFilename: filename });
   }
 
+  applyJ1939Baseline(messages, dbc, timeStart) {
+    if (!messages) {
+      return { messages, dbc };
+    }
+
+    const baseline = j1939Baseline || {};
+
+    const mutatedMessages = { ...messages };
+    Object.values(mutatedMessages).forEach((msg) => {
+      if (msg.frame) {
+        return;
+      }
+      const firstJ = msg.entries && msg.entries.find((e) => e.j1939 && baseline[e.j1939.pgn]);
+      if (!firstJ) {
+        return;
+      }
+      const def = baseline[firstJ.j1939.pgn];
+      if (!def) {
+        return;
+      }
+
+      const address = msg.address;
+      const frame = this.buildJ1939FrameFromBaseline(firstJ.j1939.pgn, def, address);
+      dbc.messages.set(address, frame);
+      msg.frame = frame;
+
+      // Populate signal values for each entry
+      msg.entries = msg.entries.map((entry) => ({
+        ...entry,
+        signals: dbc.getSignalValues(address, entry.data)
+      }));
+    });
+
+    return { messages: mutatedMessages, dbc };
+  }
+
+  buildJ1939FrameFromBaseline(pgn, def, address) {
+    const signals = {};
+    let maxBit = 0;
+    (def.signals || []).forEach((sigDef) => {
+      const valueDescriptions = new Map(
+        sigDef.type === 'lookup' && sigDef.map
+          ? Object.entries(sigDef.map)
+          : []
+      );
+      const size = sigDef.bit_length || 0;
+      const startBit = sigDef.start_bit || 0;
+      maxBit = Math.max(maxBit, startBit + size);
+      const sig = new Signal({
+        name: sigDef.name,
+        startBit,
+        size,
+        factor: sigDef.factor !== undefined ? sigDef.factor : 1,
+        offset: sigDef.offset !== undefined ? sigDef.offset : 0,
+        unit: sigDef.unit || '',
+        isLittleEndian: true,
+        isSigned: sigDef.type === 'signed',
+        valueDescriptions
+      });
+      signals[sig.name] = sig;
+    });
+    const sizeBytes = Math.max(8, Math.ceil(maxBit / 8));
+    return new Frame({
+      name: def.acronym || `PGN_${pgn}`,
+      id: address,
+      size: sizeBytes,
+      transmitters: ['J1939'],
+      extended: 1,
+      comment: def.name || null,
+      signals,
+      _j1939Baseline: true
+    });
+  }
+
+  mergeJ1939BaselineIntoDbc(dbc, messages) {
+    if (!messages || !dbc) {
+      return dbc;
+    }
+    const baseline = j1939Baseline || {};
+
+    const mutatedMessages = { ...messages };
+    Object.values(mutatedMessages).forEach((msg) => {
+      const firstJ = msg.entries && msg.entries.find((e) => e.j1939 && baseline[e.j1939.pgn]);
+      if (!firstJ) {
+        return;
+      }
+      const def = baseline[firstJ.j1939.pgn];
+      if (!def) {
+        return;
+      }
+
+      const address = msg.address;
+      const frame = this.buildJ1939FrameFromBaseline(firstJ.j1939.pgn, def, address);
+      dbc.messages.set(address, frame); // baseline wins on conflict
+    });
+
+    return dbc;
+  }
+
+  stripBaselineFromDbc(dbc) {
+    if (!dbc) {
+      return dbc;
+    }
+    const newDbc = new DBC();
+    newDbc.boardUnits = [...dbc.boardUnits];
+    newDbc.comments = [...dbc.comments];
+    newDbc.messages = new Map();
+    dbc.messages.forEach((frame, id) => {
+      if (!frame || frame._j1939Baseline) {
+        return;
+      }
+      newDbc.messages.set(id, frame);
+    });
+    return newDbc;
+  }
+
+  reparseMessagesWithDbc(messages, dbc, firstCanTime) {
+    const updatedMessages = { ...messages };
+    Object.keys(updatedMessages).forEach((key) => {
+      const msg = { ...updatedMessages[key] };
+      msg.frame = dbc.getMessageFrame(msg.address);
+      msg.entries = [...msg.entries];
+      let prevEntry = null;
+      const byteStateChangeCounts = [];
+      msg.entries = msg.entries.map((entry) => {
+        const parsed = DbcUtils.parseMessage(
+          dbc,
+          entry.time,
+          msg.address,
+          entry.data,
+          firstCanTime,
+          prevEntry
+        );
+        prevEntry = parsed.msgEntry;
+        byteStateChangeCounts.push(parsed.byteStateChangeCounts);
+        return {
+          ...entry,
+          signals: parsed.msgEntry.signals,
+          byteStateChangeCounts: parsed.byteStateChangeCounts
+        };
+      });
+      msg.byteStateChangeCounts = byteStateChangeCounts.reduce((memo, val) => {
+        if (!memo) return val;
+        return memo.map((count, idx) => val[idx] + count);
+      }, null);
+      updatedMessages[key] = msg;
+    });
+
+    const maxByteStateChangeCount = DbcUtils.findMaxByteStateChangeCount(updatedMessages);
+    Object.keys(updatedMessages).forEach((key) => {
+      updatedMessages[key] = DbcUtils.setMessageByteColors(
+        updatedMessages[key],
+        maxByteStateChangeCount
+      );
+    });
+    return updatedMessages;
+  }
+
+  toggleJ1939Enabled(show) {
+    if (show === this.state.j1939Enabled) return;
+
+    let { dbc, messages, firstCanTime } = this.state;
+
+    if (show) {
+      dbc = this.mergeJ1939BaselineIntoDbc(dbc, messages);
+      messages = this.reparseMessagesWithDbc(messages, dbc, firstCanTime);
+    } else {
+      dbc = this.stripBaselineFromDbc(dbc);
+      messages = this.reparseMessagesWithDbc(messages, dbc, firstCanTime);
+    }
+
+    this.setState({
+      j1939Enabled: show,
+      dbc,
+      dbcText: dbc.text(),
+      messages
+    });
+  }
+
   unloadDbc() {
     const newDbc = new DBC();
     const clearedMessages = {};
@@ -1449,10 +1650,15 @@ export default class CanExplorer extends Component {
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
-        const { messages, firstCanTime, duration } = parseCSVLog(e.target.result);
-        
+        let { messages, firstCanTime, duration } = parseCSVLog(e.target.result);
         // Reset to new DBC for new CSV
-        const newDbc = new DBC();
+        let newDbc = new DBC();
+
+        if (this.state.j1939Enabled) {
+          const applied = this.applyJ1939Baseline(messages, newDbc, firstCanTime);
+          messages = applied.messages;
+          newDbc = applied.dbc;
+        }
 
         this.setState({
           messages,
@@ -1514,33 +1720,36 @@ export default class CanExplorer extends Component {
           </a>
         </div>
         <div className="cabana-window">
-          <Meta
-            url={this.state.route ? route.url : null}
-            messages={messages}
-            selectedMessages={selectedMessages}
-            updateSelectedMessages={this.updateSelectedMessages}
-            showEditMessageModal={this.showEditMessageModal}
-            currentParts={currentParts}
-            onMessageSelected={this.onMessageSelected}
-            onMessageUnselected={this.onMessageUnselected}
-            showLoadDbc={this.showLoadDbc}
+        <Meta
+          url={this.state.route ? route.url : null}
+          messages={messages}
+          selectedMessages={selectedMessages}
+          updateSelectedMessages={this.updateSelectedMessages}
+          showJ1939={this.state.j1939Enabled}
+          onToggleShowJ1939={this.toggleJ1939Enabled}
+          seekIndex={seekIndex}
+          showEditMessageModal={this.showEditMessageModal}
+          currentParts={currentParts}
+          onMessageSelected={this.onMessageSelected}
+          onMessageUnselected={this.onMessageUnselected}
+          showLoadDbc={this.showLoadDbc}
             showSaveDbc={this.showSaveDbc}
             unloadDbc={this.unloadDbc}
             dbcFilename={dbcFilename}
             dbcLastSaved={dbcLastSaved}
             dongleId={this.props.dongleId}
             name={this.props.name}
-            route={route}
-            seekTime={seekTime}
-            seekIndex={seekIndex}
-            shareUrl={shareUrl}
-            maxByteStateChangeCount={maxByteStateChangeCount}
-            live={live}
-            csvPlayback={this.state.csvPlayback}
-            saveLog={debounce(this.downloadLogAsCSV, 500)}
-            handleCsvUpload={this.handleCsvUpload}
-            onDbcFilenameChange={this.onDbcFilenameChange}
-          />
+          route={route}
+          seekTime={seekTime}
+          seekIndex={seekIndex}
+          shareUrl={shareUrl}
+          maxByteStateChangeCount={maxByteStateChangeCount}
+          live={live}
+          csvPlayback={this.state.csvPlayback}
+          saveLog={debounce(this.downloadLogAsCSV, 500)}
+          handleCsvUpload={this.handleCsvUpload}
+          onDbcFilenameChange={this.onDbcFilenameChange}
+        />
           {route || live ? (
             <Explorer
               url={route ? route.url : null}
@@ -1590,8 +1799,6 @@ export default class CanExplorer extends Component {
           <LoadDbcModal
             onDbcSelected={this.onDbcSelected}
             handleClose={this.hideLoadDbc}
-            openDbcClient={this.openDbcClient}
-            loginWithGithub={this.loginWithGithub()}
           />
         ) : null}
 

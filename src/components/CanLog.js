@@ -254,6 +254,10 @@ export default class CanLog extends Component {
       <div className="signals-log-list">
         <div className="signals-log-list-header">
           <div className="signals-log-list-message">Message</div>
+          <div className="signals-log-list-pri">PRI</div>
+          <div className="signals-log-list-pgn">PGN</div>
+          <div className="signals-log-list-sa">SA</div>
+          <div className="signals-log-list-da">DA</div>
           <div className="signals-log-list-time">Time</div>
           <div className="signals-log-list-bytes">Bytes</div>
         </div>

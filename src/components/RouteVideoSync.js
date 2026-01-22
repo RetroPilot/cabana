@@ -224,6 +224,7 @@ export default class RouteVideoSync extends Component {
           playing={this.props.playing}
           ratioTime={this.ratioTime}
           segment={segment}
+          playSpeed={playSpeed}
         />
       </div>
     );

@@ -82,6 +82,8 @@ export function parseCSVLog(csvText) {
       }
     }
 
+    const j1939 = parseJ1939Meta(address);
+
     messages[messageId].entries.push({
       time,
       relTime,
@@ -90,7 +92,8 @@ export function parseCSVLog(csvText) {
       data: new Uint8Array(hexToBytes(hexData)),
       hexData,
       signals: {},
-      byteStateChangeCounts: entryByteChangeCounts
+      byteStateChangeCounts: entryByteChangeCounts,
+      j1939
     });
   }
 
@@ -112,6 +115,33 @@ export function parseCSVLog(csvText) {
     messages,
     firstCanTime: firstTime,
     duration
+  };
+}
+
+function parseJ1939Meta(address) {
+  if (!Number.isInteger(address) || address <= 0x7FF || address > 0x1FFFFFFF) {
+    return null;
+  }
+
+  const priority = (address >> 26) & 0x7;
+  const dp = (address >> 24) & 0x1;
+  const pf = (address >> 16) & 0xFF;
+  const ps = (address >> 8) & 0xFF;
+  const sa = address & 0xFF;
+
+  let pgn = (address >> 8) & 0x3FFFF; // includes DP
+  if (pf < 0xF0) {
+    // PDU1: PS is destination, zero out for PGN
+    pgn &= 0x3FF00;
+  }
+
+  return {
+    priority,
+    dp,
+    pf,
+    ps,
+    sa,
+    pgn
   };
 }
 

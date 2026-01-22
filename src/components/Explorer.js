@@ -141,14 +141,13 @@ export default class Explorer extends Component {
     // remove plottedSignals that no longer exist
     const newPlottedSignals = this.state.plottedSignals
       .map((plot) => plot.filter(({ messageId, signalUid }) => {
-        const messageExists = Boolean(this.props.messages[messageId]);
-        let signalExists = true;
-        if (messageExists) {
-          signalExists = Object.values(this.props.messages[messageId].frame.signals)
-            .some((signal) => signal.uid === signalUid);
+        const message = this.props.messages[messageId];
+        if (!message || !message.frame || !message.frame.signals) {
+          return false;
         }
-
-        return messageExists && signalExists;
+        const signalExists = Object.values(message.frame.signals)
+          .some((signal) => signal.uid === signalUid);
+        return signalExists;
       }))
       .filter((plot) => plot.length > 0);
 
@@ -162,7 +161,7 @@ export default class Explorer extends Component {
       const { segment, segmentIndices } = clipSegment(
         this.state.segment,
         this.state.segmentIndices,
-        curMessage
+        curMessage || { entries: [] }
       );
 
       this.setState({

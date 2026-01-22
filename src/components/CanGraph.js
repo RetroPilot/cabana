@@ -200,11 +200,7 @@ export default class CanGraph extends Component {
     };
   }
 
-  debugLog(msg, payload) {
-    if (console && console.log) {
-      console.log('[CanGraph]', msg, payload);
-    }
-  }
+  debugLog() {}
 
   segmentIsNew(newSegment) {
     return (
