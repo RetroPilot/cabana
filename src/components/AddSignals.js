@@ -52,7 +52,9 @@ export default class AddSignals extends Component {
     messageIndex: PropTypes.number,
     onSignalPlotChange: PropTypes.func,
     plottedSignalUids: PropTypes.array,
-    selectedMessageKey: PropTypes.string
+    selectedMessageKey: PropTypes.string,
+    colorOverrides: PropTypes.object,
+    onSignalColorRandomize: PropTypes.func
   };
 
   constructor(props) {
@@ -102,6 +104,9 @@ export default class AddSignals extends Component {
         maxMessageBytes: DbcUtils.maxMessageSize(this.props.message)
       }, this.updateSignalStyles);
     }
+    if (prevProps.colorOverrides !== this.props.colorOverrides) {
+      this.updateSignalStyles();
+    }
   }
 
   shouldComponentUpdate(nextProps, nextState) {
@@ -110,13 +115,27 @@ export default class AddSignals extends Component {
       nextProps.message.address !== this.props.message.address ||
       nextProps.message.hexData !== this.props.message.hexData ||
       nextProps.messageIndex !== this.props.messageIndex ||
+      nextProps.colorOverrides !== this.props.colorOverrides ||
       JSON.stringify(nextProps.plottedSignalUids) !== JSON.stringify(this.props.plottedSignalUids) ||
       JSON.stringify(this.state) !== JSON.stringify(nextState)
     );
   }
 
+  colorKey(messageId, signalUid) {
+    return `${messageId}::${signalUid}`;
+  }
+
+  getColorsForSignal(signal) {
+    const messageId = this.props.selectedMessageKey;
+    const key = this.colorKey(messageId, signal.uid);
+    if (this.props.colorOverrides && this.props.colorOverrides[key]) {
+      return this.props.colorOverrides[key];
+    }
+    return signal.getColors(messageId);
+  }
+
   signalColorStyle(signal) {
-    const colors = signal.getColors(this.props.selectedMessageKey);
+    const colors = this.getColorsForSignal(signal);
 
     let colorRgbStr;
     let backgroundColor;
@@ -523,13 +542,6 @@ export default class AddSignals extends Component {
     }
   };
 
-  onTentativeSignalChange = (signal) => {
-    // Tentative signal changes are not propagated up
-    // but their effects are displayed in the bitmatrix
-    const { signals } = this.state;
-    signals[signal.name] = signal;
-    this.setState({ signals });
-  };
 
   onSignalChange = (signal) => {
     const { signals } = this.state;
@@ -591,16 +603,16 @@ export default class AddSignals extends Component {
         {this.renderBitMatrix()}
         <SignalLegend
           signals={this.state.signals}
-          signalStyles={this.state.signalStyles}
           highlightedSignal={this.state.highlightedSignal}
           onSignalHover={this.onSignalHover}
           onSignalHoverEnd={this.onSignalHoverEnd}
-          onTentativeSignalChange={this.onTentativeSignalChange}
           onSignalChange={this.onSignalChange}
           onSignalRemove={this.onSignalRemove}
           onSignalPlotChange={this.onSignalPlotChange}
           plottedSignalUids={this.props.plottedSignalUids}
           selectedMessageKey={selectedMessageKey}
+          colorOverrides={this.props.colorOverrides}
+          onSignalColorRandomize={this.props.onSignalColorRandomize}
         />
       </div>
     );

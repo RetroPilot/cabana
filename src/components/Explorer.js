@@ -1,5 +1,6 @@
 import React, { Component } from 'react';
 import PropTypes from 'prop-types';
+import randomcolor from 'randomcolor';
 
 import cx from 'classnames';
 
@@ -10,6 +11,7 @@ import CanLog from './CanLog';
 import Entries from '../models/can/entries';
 import debounce from '../utils/debounce';
 import PlaySpeedSelector from './PlaySpeedSelector';
+import GpsTrackPanel from './GpsTrackPanel';
 
 function clipSegment(_segment, _segmentIndices, nextMessage) {
   let segment = _segment;
@@ -89,7 +91,8 @@ export default class Explorer extends Component {
       userSeekIndex: 0,
       userSeekTime: 0,
       playing: props.autoplay,
-      playSpeed: 1
+      playSpeed: 1,
+      colorOverrides: {}
     };
 
     this.onSignalPlotPressed = this.onSignalPlotPressed.bind(this);
@@ -107,6 +110,7 @@ export default class Explorer extends Component {
     this.mergePlots = this.mergePlots.bind(this);
     this.toggleShouldShowAddSignal = this.toggleShouldShowAddSignal.bind(this);
     this.changePlaySpeed = this.changePlaySpeed.bind(this);
+    this.randomizeSignalColor = this.randomizeSignalColor.bind(this);
   }
 
   componentDidMount() {
@@ -337,6 +341,24 @@ export default class Explorer extends Component {
     }
   }
 
+  colorKey(messageId, signalUid) {
+    return `${messageId}::${signalUid}`;
+  }
+
+  randomizeSignalColor(messageId, signalUid) {
+    if (!messageId || !signalUid) {
+      return;
+    }
+    const key = this.colorKey(messageId, signalUid);
+    const colors = randomcolor({ format: 'rgbArray' });
+    this.setState((prev) => ({
+      colorOverrides: {
+        ...prev.colorOverrides,
+        [key]: colors
+      }
+    }));
+  }
+
   renderSelectMessagePrompt() {
     return (
       <div className="cabana-explorer-select-prompt">
@@ -396,6 +418,8 @@ export default class Explorer extends Component {
               onSignalPlotChange={this.onSignalPlotChange}
               plottedSignalUids={this.selectedMessagePlottedSignalUids()}
               selectedMessageKey={selectedMessageKey}
+              colorOverrides={this.state.colorOverrides}
+              onSignalColorRandomize={this.randomizeSignalColor}
             />
           ) : null}
           <CanLog
@@ -407,6 +431,8 @@ export default class Explorer extends Component {
             onSignalUnplotPressed={this.onSignalUnplotPressed}
             showAddSignal={this.showAddSignal}
             onMessageExpanded={this.onPause}
+            colorOverrides={this.state.colorOverrides}
+            onSignalColorRandomize={this.randomizeSignalColor}
           />
         </div>
       </div>
@@ -493,6 +519,12 @@ export default class Explorer extends Component {
               <p>Reset Segment</p>
             </div>
           ) : null}
+          <GpsTrackPanel
+            track={this.props.gpsTrack}
+            seekTime={this.props.seekTime}
+            gpsOffsetSec={this.props.gpsOffsetSec}
+            onGpsOffsetChange={this.props.onGpsOffsetChange}
+          />
           <CanGraphList
             plottedSignals={this.state.plottedSignals}
             messages={messages}
@@ -503,6 +535,8 @@ export default class Explorer extends Component {
             segment={graphSegment}
             mergePlots={this.mergePlots}
             live={this.props.live}
+            colorOverrides={this.state.colorOverrides}
+            onColorRandomize={this.randomizeSignalColor}
           />
         </div>
       </div>
@@ -528,4 +562,7 @@ Explorer.propTypes = {
   startSegments: PropTypes.array,
   route: PropTypes.object,
   share: PropTypes.object,
+  gpsTrack: PropTypes.object,
+  gpsOffsetSec: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
+  onGpsOffsetChange: PropTypes.func,
 };

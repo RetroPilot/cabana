@@ -14,7 +14,9 @@ export default class CanLog extends Component {
     onSignalPlotPressed: PropTypes.func,
     message: PropTypes.object,
     messageIndex: PropTypes.number,
-    onMessageExpanded: PropTypes.func
+    onMessageExpanded: PropTypes.func,
+    colorOverrides: PropTypes.object,
+    onSignalColorRandomize: PropTypes.func
   };
 
   constructor(props) {
@@ -36,6 +38,7 @@ export default class CanLog extends Component {
     this.onExpandAllChanged = this.onExpandAllChanged.bind(this);
     this.toggleExpandAllPackets = this.toggleExpandAllPackets.bind(this);
     this.toggleSignalPlot = this.toggleSignalPlot.bind(this);
+    this.getSignalColors = this.getSignalColors.bind(this);
   }
 
   componentDidUpdate(prevProps) {
@@ -56,6 +59,7 @@ export default class CanLog extends Component {
       || nextMessageLength !== curMessageLength
       || nextProps.messageIndex !== this.props.messageIndex
       || nextProps.plottedSignals.length !== this.props.plottedSignals.length
+      || nextProps.colorOverrides !== this.props.colorOverrides
       || JSON.stringify(nextProps.segmentIndices)
         !== JSON.stringify(this.props.segmentIndices)
       || JSON.stringify(nextState) !== JSON.stringify(this.state)
@@ -121,6 +125,21 @@ export default class CanLog extends Component {
     }
   }
 
+  colorKey(messageId, signalUid) {
+    return `${messageId}::${signalUid}`;
+  }
+
+  getSignalColors(messageId, signal) {
+    if (!signal) {
+      return [128, 128, 128];
+    }
+    const key = this.colorKey(messageId, signal.uid);
+    if (this.props.colorOverrides && this.props.colorOverrides[key]) {
+      return this.props.colorOverrides[key];
+    }
+    return signal.getColors(messageId);
+  }
+
   toggleExpandPacketSignals(msgEntry) {
     if (!this.props.message.frame) {
       return;
@@ -157,9 +176,23 @@ export default class CanLog extends Component {
           const isPlotted = this.isSignalPlotted(message.id, signal.uid);
           const plottedButtonClass = isPlotted ? null : 'button--alpha';
           const plottedButtonText = isPlotted ? 'Hide Plot' : 'Show Plot';
+          const colors = this.getSignalColors(message.id, signal);
           return (
             <div key={name} className="signals-log-list-signal">
               <div className="signals-log-list-signal-message">
+                <button
+                  type="button"
+                  className="signals-log-list-signal-color"
+                  style={{ background: `rgb(${colors}` }}
+                  title="Randomize plot color"
+                  aria-label="Randomize plot color"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (this.props.onSignalColorRandomize) {
+                      this.props.onSignalColorRandomize(message.id, signal.uid);
+                    }
+                  }}
+                />
                 <span>{name}</span>
               </div>
               <div className="signals-log-list-signal-value">

@@ -1,6 +1,5 @@
 import React, { Component } from 'react';
 import PropTypes from 'prop-types';
-
 import CanGraph from './CanGraph';
 
 export default class CanGraphList extends Component {
@@ -12,7 +11,9 @@ export default class CanGraphList extends Component {
     onSegmentChanged: PropTypes.func.isRequired,
     onSignalUnplotPressed: PropTypes.func.isRequired,
     segment: PropTypes.array.isRequired,
-    mergePlots: PropTypes.func.isRequired
+    mergePlots: PropTypes.func.isRequired,
+    colorOverrides: PropTypes.object,
+    onColorRandomize: PropTypes.func
   };
 
   constructor(props) {
@@ -160,6 +161,8 @@ export default class CanGraphList extends Component {
         canReceiveGraphDrop={canReceiveGraphDrop}
         plottedSignals={plottedSignals}
         live={this.props.live}
+        colorOverrides={this.props.colorOverrides}
+        onColorRandomize={this.props.onColorRandomize}
       />
     );
   }

@@ -1,5 +1,5 @@
 import React from 'react';
-import { shallow, mount, render } from 'enzyme';
+import { shallow } from 'enzyme';
 import { StyleSheetTestUtils } from 'aphrodite';
 import Signal from '../../models/can/signal';
 import SignalLegendEntry from '.';
@@ -16,23 +16,17 @@ afterEach(() => {
 function createSignalLegendEntry(props) {
   let { signal } = props;
   let { onSignalChange } = props;
-  let { onTentativeSignalChange } = props;
   if (signal === undefined) {
     signal = new Signal({ name: 'NEW_SIGNAL' });
   }
   if (onSignalChange === undefined) {
     onSignalChange = () => {};
   }
-  if (onTentativeSignalChange === undefined) {
-    onTentativeSignalChange = () => {};
-  }
 
   return shallow(
     <SignalLegendEntry
-      highlightedStyle={null}
       signal={signal}
       onSignalChange={onSignalChange}
-      onTentativeSignalChange={onTentativeSignalChange}
     />
   );
 }

@@ -35,7 +35,9 @@ export default class CanGraph extends Component {
     dragPos: PropTypes.object,
     canReceiveGraphDrop: PropTypes.bool,
     onGraphRefAvailable: PropTypes.func,
-    plottedSignals: PropTypes.array
+    plottedSignals: PropTypes.array,
+    colorOverrides: PropTypes.object,
+    onColorRandomize: PropTypes.func
   };
 
   constructor(props) {
@@ -66,6 +68,22 @@ export default class CanGraph extends Component {
     this.resetYZoom = this.resetYZoom.bind(this);
     this.zoomYAxis = this.zoomYAxis.bind(this);
     this.panYAxis = this.panYAxis.bind(this);
+    this.currentValueForSignal = this.currentValueForSignal.bind(this);
+    this.formatValue = this.formatValue.bind(this);
+    this.getColorsForSignal = this.getColorsForSignal.bind(this);
+    this.colorKey = this.colorKey.bind(this);
+  }
+
+  colorKey(messageId, signalUid) {
+    return `${messageId}::${signalUid}`;
+  }
+
+  getColorsForSignal(messageId, signalUid, signal) {
+    const key = this.colorKey(messageId, signalUid);
+    if (this.props.colorOverrides && this.props.colorOverrides[key]) {
+      return this.props.colorOverrides[key];
+    }
+    return signal.getColors(messageId);
   }
 
   getGraphData(props) {
@@ -87,10 +105,16 @@ export default class CanGraph extends Component {
           messageRelTime = entries[entries.length - 1].relTime;
           lastRelTime = Math.max(lastRelTime, messageRelTime);
         }
+        const signal = Object.values(props.messages[messageId].frame.signals)
+          .find((s) => s.uid === signalUid);
+        const overrideColors = signal
+          ? this.getColorsForSignal(messageId, signalUid, signal)
+          : null;
         return GraphData._calcGraphData(
           props.messages[messageId],
           signalUid,
-          0
+          0,
+          overrideColors
         );
       })
       .filter((v) => Array.isArray(v))
@@ -178,6 +202,58 @@ export default class CanGraph extends Component {
     this.setState({ userYDomain: newDomain }, () => {
       this.applyYDomainToView(newDomain);
     });
+  }
+
+  currentValueForSignal(messageId, signal) {
+    const msg = this.props.messages[messageId];
+    if (!msg || !msg.entries || msg.entries.length === 0 || !signal) {
+      return null;
+    }
+
+    const t = Number(this.props.currentTime);
+    if (!Number.isFinite(t)) {
+      return null;
+    }
+
+    const entries = msg.entries;
+    // binary search for closest relTime
+    let lo = 0;
+    let hi = entries.length - 1;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (entries[mid].relTime <= t) {
+        lo = mid;
+      } else {
+        hi = mid;
+      }
+    }
+    const candLo = entries[lo];
+    const candHi = entries[hi] || candLo;
+    const nearest = Math.abs((candLo && candLo.relTime) - t) <= Math.abs((candHi && candHi.relTime) - t)
+      ? candLo
+      : candHi;
+
+    if (!nearest || nearest.signals[signal.name] === undefined || nearest.signals[signal.name] === null) {
+      return null;
+    }
+    const raw = nearest.signals[signal.name];
+    return typeof raw === 'bigint' ? Number(raw) : Number(raw);
+  }
+
+  formatValue(val, unit) {
+    if (val === null || val === undefined || Number.isNaN(val)) return '--';
+    const abs = Math.abs(val);
+    let formatted;
+    if (abs >= 1000) {
+      formatted = val.toFixed(0);
+    } else if (abs >= 10) {
+      formatted = val.toFixed(2);
+    } else if (abs >= 1) {
+      formatted = val.toFixed(3);
+    } else {
+      formatted = val.toFixed(4);
+    }
+    return unit ? `${formatted} ${unit}` : formatted;
   }
 
   getGraphSpec(props, yDomain) {
@@ -297,7 +373,11 @@ export default class CanGraph extends Component {
       this.setState({ plotInnerStyle: null });
     }
 
-    if (prevProps.messages !== this.props.messages || prevProps.plottedSignal !== this.props.plottedSignal) {
+    if (
+      prevProps.messages !== this.props.messages
+      || prevProps.plottedSignal !== this.props.plottedSignal
+      || prevProps.colorOverrides !== this.props.colorOverrides
+    ) {
       const data = this.getGraphData(this.props);
       const nextYDomain = this.state.userYDomain || data.yDomain;
 
@@ -386,6 +466,17 @@ export default class CanGraph extends Component {
       return;
     }
 
+    const autoDomain = this.computeSegmentDomain(this.props, this.state.data);
+    if (Array.isArray(autoDomain) && autoDomain.length === 2) {
+      const [a0, a1] = autoDomain;
+      const [s0, s1] = cleanedSegment;
+      const eps = 1e-6;
+      if (Math.abs(a0 - s0) < eps && Math.abs(a1 - s1) < eps) {
+        // ignore programmatic segment updates used to keep the window in sync
+        return;
+      }
+    }
+
     this.props.onSegmentChanged(this.props.messageId, cleanedSegment);
 
     if (!this.view) {
@@ -470,7 +561,9 @@ export default class CanGraph extends Component {
               const signal = Object.values(
                 this.props.messages[messageId].frame.signals
               ).find((s) => s.uid === signalUid);
-              const colors = signal.getColors(messageId);
+              const colors = signal
+                ? this.getColorsForSignal(messageId, signalUid, signal)
+                : [128, 128, 128];
 
               return (
                 <div
@@ -497,8 +590,20 @@ export default class CanGraph extends Component {
                       <div
                         className="cabana-explorer-visuals-plot-signal-color"
                         style={{ background: `rgb(${colors}` }}
+                        onClick={() => {
+                          if (this.props.onColorRandomize) {
+                            this.props.onColorRandomize(messageId, signalUid);
+                          }
+                        }}
+                        title="Click to randomize color"
                       />
                       <strong>{signal.name}</strong>
+                      <span className="cabana-explorer-visuals-plot-signal-value">
+                        {this.formatValue(
+                          this.currentValueForSignal(messageId, signal),
+                          signal.unit
+                        )}
+                      </span>
                     </div>
                   </div>
                 </div>

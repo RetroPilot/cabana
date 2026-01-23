@@ -5,7 +5,7 @@ function signalColors(signal, msg) {
   return signal.colors.map((v) => (v ^ msg.address) ^ msg.bus);
 }
 
-function _calcGraphData(msg, signalUid, firstCanTime) {
+function _calcGraphData(msg, signalUid, firstCanTime, overrideColors) {
   if (!msg) return null;
 
   const signal = Object.values(msg.frame.signals).find(
@@ -33,7 +33,7 @@ function _calcGraphData(msg, signalUid, firstCanTime) {
     return [];
   }
 
-  const colors = signal.getColors(msg.id);
+  const colors = overrideColors || signal.getColors(msg.id);
   signalUid = msg.id + signalUid;
   // Sort samples by relTime to handle out-of-order messages
   samples.sort((a, b) => a.relTime - b.relTime);

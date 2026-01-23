@@ -12,15 +12,17 @@ export default class SignalLegendEntry extends Component {
   static propTypes = {
     signal: PropTypes.instanceOf(Signal).isRequired,
     isHighlighted: PropTypes.bool,
+    color: PropTypes.array,
     onSignalHover: PropTypes.func,
     onSignalHoverEnd: PropTypes.func,
-    onTentativeSignalChange: PropTypes.func,
     onSignalChange: PropTypes.func,
     onSignalRemove: PropTypes.func,
     onSignalPlotChange: PropTypes.func,
     toggleExpandSignal: PropTypes.func,
     isPlotted: PropTypes.bool,
-    isExpanded: PropTypes.bool
+    isExpanded: PropTypes.bool,
+    onSignalColorRandomize: PropTypes.func,
+    messageId: PropTypes.string
   };
 
   static fieldSpecForName = (name) => FIELDS.find((field) => field.field === name);
@@ -131,7 +133,19 @@ export default class SignalLegendEntry extends Component {
         onMouseEnter={() => this.props.onSignalHover(signal)}
         onMouseLeave={() => this.props.onSignalHoverEnd(signal)}
       >
-        <div className="signals-legend-entry-colorbar" style={ colorBarStyle } />
+        <button
+          type="button"
+          className="signals-legend-entry-colorbar"
+          style={colorBarStyle}
+          title="Randomize plot color"
+          aria-label="Randomize plot color"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (this.props.onSignalColorRandomize && this.props.messageId) {
+              this.props.onSignalColorRandomize(this.props.messageId, signal.uid);
+            }
+          }}
+        />
         <div className="signals-legend-entry-header">
           <div
             className="signals-legend-entry-header-name"

@@ -133,6 +133,7 @@ export default class OnboardingModal extends Component {
             onChange={(e) => {
               if (e.target.files && e.target.files[0]) {
                 this.props.handleCsvUpload(e.target.files[0]);
+                e.target.value = '';
               }
             }}
           />

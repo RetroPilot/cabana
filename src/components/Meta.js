@@ -62,6 +62,9 @@ export default class Meta extends Component {
     showJ1939: PropTypes.bool,
     onToggleShowJ1939: PropTypes.func,
     seekIndex: PropTypes.number,
+    handleGpsUpload: PropTypes.func,
+    onClearGpsTrack: PropTypes.func,
+    gpsTrack: PropTypes.object,
 
   };
 
@@ -549,15 +552,14 @@ export default class Meta extends Component {
                   <i className="fa fa-upload" /> Load Log
                 </button>
               </div>
-            ) : (
-              this.saveable() && (
-                <div className="cabana-meta-header-action">
-                  <button className="button--wide" onClick={this.props.saveLog}>
-                    <i className="fa fa-download" /> Save Log
-                  </button>
-                </div>
-              )
-            )}
+            ) : null}
+            {(!this.props.csvPlayback && this.saveable()) ? (
+              <div className="cabana-meta-header-action">
+                <button className="button--wide" onClick={this.props.saveLog}>
+                  <i className="fa fa-download" /> Save Log
+                </button>
+              </div>
+            ) : null}
             <div className="cabana-meta-header-action">
               <button className="button--wide" onClick={this.props.showLoadDbc}>
                 <i className="fa fa-folder-open" /> Load DBC
@@ -572,26 +574,6 @@ export default class Meta extends Component {
               <button className="button--wide" onClick={this.props.unloadDbc}>
                 <i className="fa fa-eject" /> Unload DBC
               </button>
-            </div>
-            <div className="cabana-meta-header-action j1939-toggle">
-              <label className="t-smallcaps" style={{ display: 'flex', alignItems: 'center', gap: 6, margin: 0 }}>
-                <input
-                  type="checkbox"
-                  checked={this.props.showJ1939}
-                  onChange={(e) => this.props.onToggleShowJ1939 && this.props.onToggleShowJ1939(e.target.checked)}
-                  />
-                Show J1939
-              </label>
-            </div>
-            <div className="cabana-meta-header-action j1939-toggle">
-              <label className="t-smallcaps" style={{ display: 'flex', alignItems: 'center', gap: 6, margin: 0 }}>
-                <input
-                  type="checkbox"
-                  checked={this.state.showAscii}
-                  onChange={this.toggleShowAscii}
-                />
-                Show ASCII
-              </label>
             </div>
             {this.props.shareUrl ? (
               <div
@@ -609,6 +591,53 @@ export default class Meta extends Component {
                 </a>
               </div>
             ) : null}
+            {this.props.csvPlayback ? (
+              <div className="cabana-meta-header-action">
+                <input
+                  type="file"
+                  accept=".gpx"
+                  onChange={(e) => {
+                    if (e.target.files[0] && this.props.handleGpsUpload) {
+                      this.props.handleGpsUpload(e.target.files[0]);
+                      e.target.value = '';
+                    }
+                  }}
+                  style={{ display: 'none' }}
+                  ref={(input) => { this.gpxFileInput = input; }}
+                />
+                <button className="button--wide" onClick={() => this.gpxFileInput && this.gpxFileInput.click()}>
+                  <i className="fa fa-map-marker" /> Load GPX
+                </button>
+              </div>
+            ) : null}
+            <div
+              className="cabana-meta-header-action"
+              style={{
+                width: '100%',
+                padding: 0,
+                marginTop: 8,
+                display: 'flex',
+                gap: 16,
+                alignItems: 'center',
+              }}
+            >
+              <label className="t-smallcaps" style={{ display: 'flex', alignItems: 'center', gap: 6, margin: 0 }}>
+                <input
+                  type="checkbox"
+                  checked={this.props.showJ1939}
+                  onChange={(e) => this.props.onToggleShowJ1939 && this.props.onToggleShowJ1939(e.target.checked)}
+                />
+                Show J1939
+              </label>
+              <label className="t-smallcaps" style={{ display: 'flex', alignItems: 'center', gap: 6, margin: 0 }}>
+                <input
+                  type="checkbox"
+                  checked={this.state.showAscii}
+                  onChange={this.toggleShowAscii}
+                />
+                Show ASCII
+              </label>
+            </div>
           </div>
         </div>
         <div className="cabana-meta-messages-header">

@@ -10,7 +10,9 @@ const window = self;
 
 const { Int64LE } = require('int64-buffer');
 
-function transformAndSend(rawData, canStartTime) {
+// Writes CSV lines for all messages, using epochStartTime when provided
+// to emit absolute timestamps; falls back to relative/monotonic times.
+function transformAndSend(rawData, canStartTime, epochStartTime) {
   let totalSize = 0;
   const maxTime = rawData.reduce((memo, sourceData) => {
     totalSize += sourceData.entries.length;
@@ -74,7 +76,7 @@ function transformAndSend(rawData, canStartTime) {
     curIndexes[nextSource.id]++;
     totalEntries++;
 
-    entryBuffer.push(makeEntry(nextSource, canStartTime));
+    entryBuffer.push(makeEntry(nextSource, canStartTime, epochStartTime));
 
     if (entryBuffer.length > 5000) {
       self.postMessage({
@@ -107,12 +109,16 @@ function transformAndSend(rawData, canStartTime) {
   }
 }
 
-function makeEntry(nextSource, canStartTime) {
+function makeEntry(nextSource, canStartTime, epochStartTime) {
   const hasStartTime = Number.isFinite(canStartTime);
+  const hasEpochStart = Number.isFinite(epochStartTime);
+  const startLooksEpoch = hasStartTime && canStartTime > 1e8;
   const relTime = Number.isFinite(nextSource.entry.relTime) ? nextSource.entry.relTime : 0;
-  const timestamp = hasStartTime
-    ? canStartTime + relTime
-    : relTime;
+  const timestamp = hasEpochStart
+    ? epochStartTime + relTime
+    : startLooksEpoch
+      ? canStartTime + relTime
+      : relTime;
 
   const addressHex = formatAddress(nextSource.address);
   const dataHex = (nextSource.entry.hexData || '').toUpperCase();
@@ -182,6 +188,7 @@ self.onmessage = function (e) {
     parts,
     data,
     canStartTime,
+    epochStartTime,
     prevMsgEntries,
     maxByteStateChangeCount
   } = e.data;
@@ -190,8 +197,8 @@ self.onmessage = function (e) {
   // saveDBC(dbc, base, num, canStartTime);
   if (data) {
     // has raw data from live mode, process this instead
-    console.log('Using raw data from memory', canStartTime);
-    transformAndSend(data, canStartTime);
+    console.log('Using raw data from memory', canStartTime, epochStartTime);
+    transformAndSend(data, canStartTime, epochStartTime);
   } else {
     self.postMessage({
       progress: 100,

@@ -83,7 +83,26 @@
     font-size: 12px;
     padding: 1% 0 1% 7%;
     &-message {
-      flex: 3;
+      flex: 3.5;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+    &-color {
+      width: 16px;
+      height: 16px;
+      border-radius: 4px;
+      border: 1px solid rgba(0, 0, 0, 0.2);
+      padding: 0;
+      cursor: pointer;
+      flex-shrink: 0;
+      background: transparent;
+      appearance: none;
+      &:focus {
+        outline: 2px solid rgba(63, 135, 255, 0.4);
+        outline-offset: 1px;
+      }
     }
     &-value {
       flex: 2;

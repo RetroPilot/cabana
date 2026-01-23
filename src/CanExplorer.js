@@ -32,6 +32,7 @@ import {
 import OpenDbc from './api/OpenDbc';
 import UnloggerClient from './api/unlogger';
 import { parseCSVLog } from './api/csv-loader';
+import { parseGpxTrack } from './api/gpx-loader';
 import Signal from './models/can/signal';
 import j1939Baseline from './j1939_baseline.json';
 import { hash } from './utils/string';
@@ -93,6 +94,8 @@ export default class CanExplorer extends Component {
       logUrls: null,
       share: null,
       j1939Enabled: false,
+      gpsTrack: null,
+      gpsOffsetSec: 0,
     };
 
     this.openDbcClient = new OpenDbc(props.githubAuthToken);
@@ -126,11 +129,15 @@ export default class CanExplorer extends Component {
     this.onStreamedCanMessagesProcessed = this.onStreamedCanMessagesProcessed.bind(
       this
     );
+    this.getLiveEpochOffset = this.getLiveEpochOffset.bind(this);
     this.showingModal = this.showingModal.bind(this);
     this.lastMessageEntriesById = this.lastMessageEntriesById.bind(this);
     this.githubSignOut = this.githubSignOut.bind(this);
     this.downloadLogAsCSV = this.downloadLogAsCSV.bind(this);
     this.handleCsvUpload = this.handleCsvUpload.bind(this);
+    this.handleGpsUpload = this.handleGpsUpload.bind(this);
+    this.clearGpsTrack = this.clearGpsTrack.bind(this);
+    this.setGpsOffsetSec = this.setGpsOffsetSec.bind(this);
     this.onDbcFilenameChange = this.onDbcFilenameChange.bind(this);
     this.unloadDbc = this.unloadDbc.bind(this);
     this.applyJ1939Baseline = this.applyJ1939Baseline.bind(this);
@@ -143,6 +150,18 @@ export default class CanExplorer extends Component {
 
     this.pandaReader = new Panda();
     this.pandaReader.onMessage(this.processStreamedCanMessages);
+  }
+
+  getLiveEpochOffset() {
+    if (this.liveEpochOffset !== undefined && this.liveEpochOffset !== null) {
+      return this.liveEpochOffset;
+    }
+    if (window && window.performance && typeof window.performance.now === 'function') {
+      this.liveEpochOffset = (Date.now() / 1000) - (window.performance.now() / 1000);
+      return this.liveEpochOffset;
+    }
+    this.liveEpochOffset = 0;
+    return this.liveEpochOffset;
   }
 
   componentDidMount() {
@@ -422,10 +441,44 @@ export default class CanExplorer extends Component {
     // Trigger processing of in-memory data in worker
     // this method *could* just fetch the data needed for the worked, but
     // eventually this might be in it's own worker instead of the shared one
-    const { firstCanTime, canFrameOffset } = this.state;
+    const {
+      firstCanTime,
+      canFrameOffset,
+      route,
+      csvPlayback,
+      routeInitTime,
+    } = this.state;
     const worker = new LogCSVDownloader();
 
     worker.onmessage = handler;
+
+    // Derive an epoch anchor if possible.
+    // Preference order:
+    // 1) route.start_time (from server) for route playback
+    // 2) firstCanTime if it already looks like epoch seconds
+    // 3) host clock aligned to current firstCanTime (live panda best-effort)
+    // 4) as a last resort, align relative CSV times to current wall clock so the
+    //    exported file still has epoch-ish timestamps.
+    let epochStartTime = null;
+    const looksLikeEpoch = (t) => Number.isFinite(t) && t > 1e8; // ~2003+
+
+    if (route && route.start_time && Number.isFinite(firstCanTime) && Number.isFinite(routeInitTime)) {
+      // Align epoch to the first CAN message using monotonic route init time
+      epochStartTime = (route.start_time.valueOf() / 1000) + (firstCanTime - routeInitTime);
+    } else if (route && route.start_time) {
+      epochStartTime = route.start_time.valueOf() / 1000;
+    } else if (csvPlayback && Number.isFinite(firstCanTime)) {
+      epochStartTime = looksLikeEpoch(firstCanTime)
+        ? firstCanTime
+        : (Date.now() / 1000) - firstCanTime;
+    } else if (Number.isFinite(firstCanTime)) {
+      // attempt a live alignment using current wall clock
+      epochStartTime = (Date.now() / 1000) - firstCanTime;
+      // If routeInitTime is available, prefer it for stability
+      if (Number.isFinite(routeInitTime)) {
+        epochStartTime = (Date.now() / 1000) - (firstCanTime - routeInitTime);
+      }
+    }
     
     // Use full message history if available (live streaming), otherwise use current messages
     const messagesToExport = this.fullMessageHistory || this.state.messages;
@@ -440,7 +493,8 @@ export default class CanExplorer extends Component {
           entries: source.entries.slice()
         };
       }),
-      canStartTime: firstCanTime - canFrameOffset
+      canStartTime: Number.isFinite(firstCanTime) ? firstCanTime - canFrameOffset : null,
+      epochStartTime
     });
   }
 
@@ -1273,6 +1327,13 @@ export default class CanExplorer extends Component {
       messages,
       maxByteStateChangeCount
     } = this.state;
+    const epochOffset = this.getLiveEpochOffset();
+    const epochCanMessages = Array.isArray(newCanMessages)
+      ? newCanMessages.map((batch) => ({
+        ...batch,
+        time: batch.time + epochOffset
+      }))
+      : newCanMessages;
     // map msg id to arrays
     const prevMsgEntries = Object.entries(messages).reduce(
       this.lastMessageEntriesById,
@@ -1288,7 +1349,7 @@ export default class CanExplorer extends Component {
     );
 
     this.canStreamerWorker.postMessage({
-      newCanMessages,
+      newCanMessages: epochCanMessages,
       prevMsgEntries,
       firstCanTime,
       dbcText,
@@ -1685,6 +1746,41 @@ export default class CanExplorer extends Component {
     reader.readAsText(file);
   }
 
+  looksLikeEpochSeconds(t) {
+    return Number.isFinite(t) && t > 1e8;
+  }
+
+  handleGpsUpload(file) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const track = parseGpxTrack(e.target.result);
+        const { firstCanTime } = this.state;
+        let gpsOffsetSec = 0;
+        if (this.looksLikeEpochSeconds(firstCanTime) && this.looksLikeEpochSeconds(track.startEpoch)) {
+          // Align CAN t=0 to track t=0 by default
+          gpsOffsetSec = firstCanTime - track.startEpoch;
+        }
+        this.setState({ gpsTrack: track, gpsOffsetSec });
+      } catch (err) {
+        alert('Error parsing GPX: ' + err.message);
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  clearGpsTrack() {
+    this.setState({ gpsTrack: null, gpsOffsetSec: 0 });
+  }
+
+  setGpsOffsetSec(offset) {
+    const value = Number(offset);
+    if (Number.isNaN(value) || !Number.isFinite(value)) {
+      return;
+    }
+    this.setState({ gpsOffsetSec: value });
+  }
+
   render() {
     const {
       route,
@@ -1741,13 +1837,15 @@ export default class CanExplorer extends Component {
             name={this.props.name}
           route={route}
           seekTime={seekTime}
-          seekIndex={seekIndex}
           shareUrl={shareUrl}
           maxByteStateChangeCount={maxByteStateChangeCount}
           live={live}
           csvPlayback={this.state.csvPlayback}
           saveLog={debounce(this.downloadLogAsCSV, 500)}
           handleCsvUpload={this.handleCsvUpload}
+          handleGpsUpload={this.handleGpsUpload}
+          gpsTrack={this.state.gpsTrack}
+          onClearGpsTrack={this.clearGpsTrack}
           onDbcFilenameChange={this.onDbcFilenameChange}
         />
           {route || live ? (
@@ -1782,6 +1880,9 @@ export default class CanExplorer extends Component {
               share={share}
               csvDuration={this.state.csvDuration}
               csvPlayback={this.state.csvPlayback}
+              gpsTrack={this.state.gpsTrack}
+              gpsOffsetSec={this.state.gpsOffsetSec}
+              onGpsOffsetChange={this.setGpsOffsetSec}
             />
           ) : null}
         </div>
