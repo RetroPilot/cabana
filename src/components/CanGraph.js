@@ -68,6 +68,7 @@ export default class CanGraph extends Component {
     this.resetYZoom = this.resetYZoom.bind(this);
     this.zoomYAxis = this.zoomYAxis.bind(this);
     this.panYAxis = this.panYAxis.bind(this);
+    this.zoomXAxis = this.zoomXAxis.bind(this);
     this.currentValueForSignal = this.currentValueForSignal.bind(this);
     this.formatValue = this.formatValue.bind(this);
     this.getColorsForSignal = this.getColorsForSignal.bind(this);
@@ -182,6 +183,49 @@ export default class CanGraph extends Component {
     }, () => {
       this.applyYDomainToView(newDomain);
     });
+  }
+
+  zoomXAxis(factor) {
+    const domain = this.computeSegmentDomain(this.props, this.state.data);
+    if (!Array.isArray(domain) || domain.length !== 2) {
+      return;
+    }
+
+    const [start, end] = domain;
+    const span = Math.max(end - start, Number.EPSILON);
+    const currentTime = Number(this.props.currentTime);
+    const center = Number.isFinite(currentTime)
+      ? currentTime
+      : (start + end) / 2;
+    const newSpan = span * factor;
+
+    let newStart = center - (newSpan / 2);
+    let newEnd = center + (newSpan / 2);
+
+    const min = Number.isFinite(this.state.data.firstRelTime)
+      ? this.state.data.firstRelTime
+      : 0;
+    const max = Number.isFinite(this.state.data.lastRelTime)
+      ? this.state.data.lastRelTime
+      : null;
+
+    if (Number.isFinite(max) && max > min) {
+      if (newSpan >= max - min) {
+        newStart = min;
+        newEnd = max;
+      } else {
+        if (newStart < min) {
+          newEnd += (min - newStart);
+          newStart = min;
+        }
+        if (newEnd > max) {
+          newStart -= (newEnd - max);
+          newEnd = max;
+        }
+      }
+    }
+
+    this.props.onSegmentChanged(this.props.messageId, [newStart, newEnd]);
   }
 
   resetYZoom() {
@@ -645,6 +689,26 @@ export default class CanGraph extends Component {
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span className="t-smallcaps">X Zoom</span>
+              <div
+                className="cabana-explorer-visuals-plot-controls-group"
+                style={{ display: 'flex', gap: 8 }}
+              >
+                <button
+                  className="button--tiny"
+                  onClick={() => this.zoomXAxis(0.5)}
+                  style={{ minWidth: 32, paddingLeft: 10, paddingRight: 10 }}
+                >
+                  +
+                </button>
+                <button
+                  className="button--tiny"
+                  onClick={() => this.zoomXAxis(2)}
+                  style={{ minWidth: 32, paddingLeft: 10, paddingRight: 10 }}
+                >
+                  -
+                </button>
+              </div>
               <span className="t-smallcaps">Y Zoom</span>
               <div
                 className="cabana-explorer-visuals-plot-controls-group"
